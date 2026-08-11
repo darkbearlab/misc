@@ -1,0 +1,3 @@
+# The compiled DoL build is a single ~50 MB HTML file. Textual diffs on it are
+# useless and expensive, and CRLF conversion would corrupt it.
+dol/*.html -text -diff
