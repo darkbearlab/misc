@@ -6,10 +6,16 @@ Two builds live in this folder:
 |---|---|
 | `Degrees of Lewdity 0.5.11.9 text only.html` | Untouched vanilla build, extracted from the uploaded archive |
 | `Degrees of Lewdity 0.5.11.9 text only (cheat).html` | Same build with progression values retuned |
+| `index.html` | Launcher page — open it and click the build you want |
 
-Download the `(cheat)` file and open it in a browser — it is self-contained, same
-as the vanilla one. This is the "text only" release, so it has no images; that is
-a property of the upload, not of the patch.
+Either build is self-contained, so opening one directly in a browser works just as
+well as going through `index.html`. This is the "text only" release, so it has no
+images; that is a property of the upload, not of the patch.
+
+Note that none of this runs from github.com. A 50 MB HTML file is served as a
+download rather than rendered, and raw links come back as plain text, so the game
+has to be on your own machine to play. Clone the repo or download the folder
+first, then open `index.html`.
 
 Saves are interchangeable between the two builds. The patch only changes
 multipliers, never the shape of a saved variable, so you can move a save back to
