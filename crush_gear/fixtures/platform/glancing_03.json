@@ -1,0 +1,28 @@
+{
+  "id": "glancing_03",
+  "category": "glancing",
+  "description": "擦邊碰撞（小力臂、高角速度）",
+  "expected": {
+    "reason": "OUT",
+    "frames": 392
+  },
+  "seed": 20261370,
+  "throwA": {
+    "x": 0.1369,
+    "z": -0.1943,
+    "y": 0.0632,
+    "yaw": 5.4297,
+    "pitch": -0.1028,
+    "speed": 0.6815,
+    "spin": 6.2364
+  },
+  "throwB": {
+    "x": -0.1895,
+    "z": -0.3093,
+    "y": 0.0773,
+    "yaw": 5.3558,
+    "pitch": -0.0505,
+    "speed": 3.7363,
+    "spin": 10.014
+  }
+}

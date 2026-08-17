@@ -1,0 +1,6 @@
+{
+  "_comment": "高速對撞：兩車自 stadium 兩端以最大合法初速 5.0 m/s 正面對衝，B 在對撞後被前武器掀翻。結果 B_WINS / FLIP / 501 frames。",
+  "seed": 20260817,
+  "throwA": { "x": 0, "z": -0.4, "y": 0.032, "yaw": 0, "pitch": 0, "speed": 5, "spin": 0 },
+  "throwB": { "x": 0, "z": 0.4, "y": 0.032, "yaw": 3.14159265, "pitch": 0, "speed": 5, "spin": 0 }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "early_out_02",
+  "category": "early_out",
+  "description": "早期出界（短場次，作為對照）",
+  "expected": {
+    "reason": "OUT",
+    "frames": 11
+  },
+  "seed": 20260826,
+  "throwA": {
+    "x": 0.1692,
+    "z": 0.2123,
+    "y": 0.1171,
+    "yaw": 1.4391,
+    "pitch": 0.2588,
+    "speed": 3.0106,
+    "spin": 5.3
+  },
+  "throwB": {
+    "x": 0.0555,
+    "z": -0.3542,
+    "y": 0.0376,
+    "yaw": 5.0696,
+    "pitch": -0.1002,
+    "speed": 0.0438,
+    "spin": -6.1357
+  }
+}

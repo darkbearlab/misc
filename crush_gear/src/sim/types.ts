@@ -1,0 +1,214 @@
+/**
+ * 共用型別定義，以及模擬各層共用的純向量／四元數運算。
+ *
+ * 這裡的所有函式皆為 pure：不接觸任何全域狀態、不做 I/O、不使用 Math.random / Date.now。
+ * Vec3 / Quat 的欄位名稱刻意與 Rapier 的 `Vector` / `Rotation` 一致，可直接互傳。
+ */
+
+// ──────────────────────────────────────────────────────────────────────────
+// 基本幾何型別
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface Vec3 {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+export interface Quat {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly w: number;
+}
+
+export const WORLD_UP: Vec3 = { x: 0, y: 1, z: 0 };
+
+// ──────────────────────────────────────────────────────────────────────────
+// 純向量運算
+// ──────────────────────────────────────────────────────────────────────────
+
+export function vec3(x: number, y: number, z: number): Vec3 {
+  return { x, y, z };
+}
+
+export function add(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+export function sub(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+export function scale(a: Vec3, s: number): Vec3 {
+  return { x: a.x * s, y: a.y * s, z: a.z * s };
+}
+
+export function dot(a: Vec3, b: Vec3): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+export function cross(a: Vec3, b: Vec3): Vec3 {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+
+export function length(a: Vec3): number {
+  return Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+}
+
+/** 長度為 0 時回傳零向量，呼叫端必須自行判斷退化情形。 */
+export function normalize(a: Vec3): Vec3 {
+  const len = length(a);
+  if (len === 0) return { x: 0, y: 0, z: 0 };
+  return { x: a.x / len, y: a.y / len, z: a.z / len };
+}
+
+/** 將 v 投影到以 n（單位向量）為法線的平面上。 */
+export function projectOntoPlane(v: Vec3, n: Vec3): Vec3 {
+  const d = dot(v, n);
+  return { x: v.x - d * n.x, y: v.y - d * n.y, z: v.z - d * n.z };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 純四元數運算
+// ──────────────────────────────────────────────────────────────────────────
+
+/** axis 必須為單位向量。 */
+export function quatFromAxisAngle(axis: Vec3, angle: number): Quat {
+  const half = angle * 0.5;
+  const s = Math.sin(half);
+  return { x: axis.x * s, y: axis.y * s, z: axis.z * s, w: Math.cos(half) };
+}
+
+/** Hamilton product：先套用 b 再套用 a。 */
+export function quatMul(a: Quat, b: Quat): Quat {
+  return {
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  };
+}
+
+/** 以四元數旋轉向量：v' = q · v · q⁻¹（q 必須為單位四元數）。 */
+export function rotateByQuat(q: Quat, v: Vec3): Vec3 {
+  // t = 2 * (q_vec × v);  v' = v + q_w * t + q_vec × t
+  const tx = 2 * (q.y * v.z - q.z * v.y);
+  const ty = 2 * (q.z * v.x - q.x * v.z);
+  const tz = 2 * (q.x * v.y - q.y * v.x);
+  return {
+    x: v.x + q.w * tx + (q.y * tz - q.z * ty),
+    y: v.y + q.w * ty + (q.z * tx - q.x * tz),
+    z: v.z + q.w * tz + (q.x * ty - q.y * tx),
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// §7 投擲參數
+// ──────────────────────────────────────────────────────────────────────────
+
+/** 玩家唯一的操作面：每台車以一組投擲參數投入場中。 */
+export type ThrowParams = {
+  /** 投入點 X，範圍 [-0.45, 0.45]。 */
+  x: number;
+  /** 投入點 Z，範圍 [-0.45, 0.45]。 */
+  z: number;
+  /** 投入高度，範圍 [0.02, 0.15]。 */
+  y: number;
+  /** 車頭朝向，弧度 [0, 2π)。繞世界 +Y 軸。 */
+  yaw: number;
+  /** 俯仰角，弧度 [-0.3, 0.3]。正值為機首上仰。 */
+  pitch: number;
+  /** 初速大小，m/s，範圍 [0, 5.0]。方向由 yaw 與 pitch 決定。 */
+  speed: number;
+  /** 初始角速度（繞世界 +Y 軸），rad/s，範圍 [-20, 20]。 */
+  spin: number;
+};
+
+/** 一場戰鬥的完整輸入。相同輸入必然產生相同輸出。 */
+export type BattleInput = {
+  seed: number;
+  throwA: ThrowParams;
+  throwB: ThrowParams;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// §8 / §10 判定與輸出
+// ──────────────────────────────────────────────────────────────────────────
+
+export type BattleResult = 'A_WINS' | 'B_WINS' | 'DRAW';
+
+export type BattleReason = 'OUT' | 'FLIP' | 'TIMEOUT';
+
+export type Outcome = {
+  result: BattleResult;
+  reason: BattleReason;
+};
+
+/** 判定用的每幀車輛狀態快照。 */
+export type VehicleJudgeState = {
+  /** 質心世界座標。 */
+  com: Vec3;
+  /** 車體局部 +Y 經旋轉後的世界向量。 */
+  up: Vec3;
+};
+
+/**
+ * 非規格必要、僅供 §11 驗收與調參使用的診斷數據。
+ * CLI 的 `--input` 輸出不含此欄位（§10 的輸出格式為固定四欄）。
+ */
+export type SimStats = {
+  /** 全程車體質心 y 的最大值（§11.2 要求不得 > 0.5）。 */
+  maxComY: number;
+  /** 全程最大線速度。 */
+  maxLinearSpeed: number;
+  /** 全程最大角速度。 */
+  maxAngularSpeed: number;
+  /** 線速度 clamp 觸發次數（§11.2 要求為 0）。 */
+  linearClampHits: number;
+  /** 角速度 clamp 觸發次數（§11.2 要求為 0）。 */
+  angularClampHits: number;
+};
+
+/**
+ * 診斷選項（§16 跨平台驗證專用）。
+ * 全部不影響物理計算，只影響額外記錄多少資訊。
+ */
+export type SimOptions = {
+  /**
+   * 額外記錄「每一幀」的 checksum。
+   * §9.2 規定的取樣頻率是每 60 幀一次，跨平台分歧只能定位到 60 幀的區間；
+   * 開啟本選項才能把首次分歧定位到確切幀號。
+   */
+  dense?: boolean;
+  /** 在指定幀擷取雙方的完整狀態（未量化），供分歧診斷使用。 */
+  captureFrame?: number;
+};
+
+/** 單台車在某一幀的完整狀態，供 §16 的分歧診斷輸出。 */
+export type VehicleStateDump = {
+  translation: Vec3;
+  rotation: Quat;
+  linvel: Vec3;
+  angvel: Vec3;
+};
+
+export type SimResult = {
+  result: BattleResult;
+  reason: BattleReason;
+  frames: number;
+  checksums: number[];
+  stats: SimStats;
+  /** 僅在 `SimOptions.dense` 為真時存在：第 0 幀起每一幀的 checksum。 */
+  denseChecksums?: number[];
+  /** 僅在 `SimOptions.captureFrame` 命中時存在。 */
+  capturedState?: {
+    frame: number;
+    a: VehicleStateDump;
+    b: VehicleStateDump;
+  };
+};

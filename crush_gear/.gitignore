@@ -1,0 +1,20 @@
+node_modules/
+dist/
+coverage/
+*.csv
+*.csv.histogram.json
+*.log
+.DS_Store
+
+# §16 的工作用 baseline（含 dense checksums，約 900 KB）。
+#
+# ⚠️ 這幾條**必須以 / 開頭錨定在根目錄**。不加斜線的 `baseline.json` 會匹配任何層級，
+# 連已簽入的參考 baseline `fixtures/platform/baseline.json` 一起排除掉 ——
+# 那正是 SPEC v1.3 §2.2 警告的情況：§11.8 的矩陣會因此失去比對基準。
+/baseline.json
+/fixtures/platform-baseline.json
+
+# package-lock.json 與 fixtures/ 必須納入版本控制：
+#   - lock file 未提交，CI 上安裝到的可能是不同的 wasm binary，矩陣結果失去意義（§2.2）
+#   - fixtures/ 是 §11.8 的比對基準本身
+# 兩者刻意不出現在本檔案的任何規則中。

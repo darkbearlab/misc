@@ -1,0 +1,28 @@
+{
+  "id": "early_flip_01",
+  "category": "early_flip",
+  "description": "早期翻覆",
+  "expected": {
+    "reason": "FLIP",
+    "frames": 84
+  },
+  "seed": 20260824,
+  "throwA": {
+    "x": 0.2472,
+    "z": -0.2068,
+    "y": 0.0992,
+    "yaw": 4.7902,
+    "pitch": -0.1959,
+    "speed": 0.8785,
+    "spin": -7.1232
+  },
+  "throwB": {
+    "x": -0.1711,
+    "z": 0.1305,
+    "y": 0.0961,
+    "yaw": 2.2098,
+    "pitch": -0.234,
+    "speed": 3.7151,
+    "spin": 5.8066
+  }
+}

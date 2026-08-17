@@ -1,0 +1,28 @@
+{
+  "id": "head_on_02",
+  "category": "head_on",
+  "description": "高速正面對撞（speed 接近上限，撞擊衝量最大）",
+  "expected": {
+    "reason": "TIMEOUT",
+    "frames": 7200
+  },
+  "seed": 1,
+  "throwA": {
+    "x": -0.02,
+    "z": -0.4,
+    "y": 0.032,
+    "yaw": 0,
+    "pitch": 0,
+    "speed": 5,
+    "spin": 0
+  },
+  "throwB": {
+    "x": 0.02,
+    "z": 0.4,
+    "y": 0.032,
+    "yaw": 3.1416,
+    "pitch": 0,
+    "speed": 5,
+    "spin": 0
+  }
+}
