@@ -1,10 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    // DOM 是給 src/render 與 src/ui 用的。src/sim 與 src/data 不得碰瀏覽器 API，
+    // 該約束由 eslint.config.js 的 no-restricted-globals 與 tests/acceptance.test.ts 強制，
+    // 不靠 lib 設定把關（單一 tsconfig 比多份設定檔好維護）。
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["node"],
+    "types": ["node", "vite/client"],
 
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -25,5 +28,11 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "tools/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "tools/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts",
+    "vite.config.ts"
+  ]
 }

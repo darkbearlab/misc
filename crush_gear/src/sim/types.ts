@@ -187,6 +187,71 @@ export type SimOptions = {
   dense?: boolean;
   /** 在指定幀擷取雙方的完整狀態（未量化），供分歧診斷使用。 */
   captureFrame?: number;
+  /** 記錄每幀雙車的位置與旋轉，供 replay 播放器使用（§P1.3）。 */
+  trajectory?: boolean;
+  /** 記錄每幀每輪的接地／法向力／輪胎力／接觸點等除錯資料（§P1.5）。 */
+  diagnostics?: boolean;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// §P1.3 / §P1.5 軌跡與診斷（皆為旁路輸出，不參與任何物理計算或 checksum）
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * 每幀的位置與旋轉，索引 0 = 車 A、1 = 車 B。
+ *
+ * **`position` 是剛體原點的位移（`body.translation()`），不是質心。**
+ * 渲染的 mesh 是以車體局部座標建構的，要放對位置就必須用剛體原點的變換；
+ * 用質心會讓整台車偏移約 (0, 0.0025, 0.0178) m。
+ *
+ * 以 f32 儲存是刻意的（§P1.3.2）：這是**顯示用**資料，不回饋模擬。
+ * 模擬全程 f64，checksum 依 §9.2 由 f64 狀態量化後計算，兩者不共用。
+ * **不得反過來以軌跡資料重建模擬狀態，或以軌跡的 f32 值做任何判定。**
+ */
+export type TrajectoryFrames = {
+  frameCount: number;
+  /** 長度 frameCount * 3 */
+  position: Float32Array[];
+  /** 長度 frameCount * 4，四元數 (x, y, z, w) */
+  rotation: Float32Array[];
+};
+
+/**
+ * 單台車的每輪診斷寫入端（§P1.5）。
+ *
+ * 這是**旁路寫入**：`applyWheelForces()` 只是把已經算出來的中間值抄一份出來，
+ * 不為了記錄而重新計算，也不調整任何計算順序。`frame` 由 `simulate()` 每幀設定。
+ */
+export type WheelDiagnosticsWriter = {
+  grounded: Uint8Array;
+  normalForce: Float32Array;
+  tireForce: Float32Array;
+  contactPoint: Float32Array;
+  frame: number;
+};
+
+/** §P1.5 除錯疊圖用的每輪資料，索引 0 = 車 A、1 = 車 B。 */
+export type TrajectoryDiagnostics = {
+  /** frameCount * 4；1 = 該輪該幀取得有效接觸 */
+  wheelGrounded: Uint8Array[];
+  /** frameCount * 4；懸吊法向力 N（牛頓） */
+  normalForce: Float32Array[];
+  /** frameCount * 4 * 3；輪胎力向量（世界座標，牛頓） */
+  tireForce: Float32Array[];
+  /** frameCount * 4 * 3；接觸點世界座標 */
+  contactPoint: Float32Array[];
+  /** frameCount；質心到 stadium 中心線的距離 */
+  stadiumDist: Float32Array[];
+  /** frameCount；FLIP 連續幀計數器 */
+  flipCounter: Uint16Array[];
+  /**
+   * 車體局部座標的質心，每台車一組（整場固定不變）。
+   *
+   * 疊圖要標出重心位置就必須有它，而它是 Rapier 依兩個 collider 的質量分佈合成的，
+   * 無法從常數推導。這裡只是把建構完成後讀到的值抄一份出來（旁路，§P1.2.2）。
+   * 軌跡中的 position 是**剛體原點**，質心 = position + rotation · localCenterOfMass。
+   */
+  localCenterOfMass: Vec3[];
 };
 
 /** 單台車在某一幀的完整狀態，供 §16 的分歧診斷輸出。 */
@@ -205,6 +270,10 @@ export type SimResult = {
   stats: SimStats;
   /** 僅在 `SimOptions.dense` 為真時存在：第 0 幀起每一幀的 checksum。 */
   denseChecksums?: number[];
+  /** 僅在 `SimOptions.trajectory` 為真時存在（§P1.3）。 */
+  trajectory?: TrajectoryFrames;
+  /** 僅在 `SimOptions.diagnostics` 為真時存在（§P1.5）。 */
+  diagnostics?: TrajectoryDiagnostics;
   /** 僅在 `SimOptions.captureFrame` 命中時存在。 */
   capturedState?: {
     frame: number;

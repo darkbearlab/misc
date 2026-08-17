@@ -35,6 +35,7 @@ import {
   WHEELBASE,
   WHEEL_ANCHORS,
 } from '../src/data/constants.js';
+import { PHYSICS_CONSTANTS_SHA256 } from '../src/data/version.js';
 import { stadiumDistance } from '../src/sim/judge.js';
 import { Rng } from '../src/sim/rng.js';
 import { simulate } from '../src/sim/simulate.js';
@@ -367,30 +368,69 @@ const RENDERING_PATTERN =
   /\b(getContext|WebGLRenderingContext|WebGL2RenderingContext|requestAnimationFrame|HTMLCanvasElement|OffscreenCanvas|THREE|BABYLON|PIXI)\b/;
 const BROWSER_PATTERN = /(^|[^.\w])(window|document|performance|navigator|localStorage)\s*\./;
 
-describe('§11.6 無渲染碼', () => {
-  const sources = [
+/**
+ * §11.6 於 Phase 1 重新界定範圍。
+ *
+ * Phase 0 的條文是「全專案不含任何渲染相關依賴或程式碼」，而 Phase 1 §P0.1
+ * 明確指定採用 three.js —— 兩者字面上直接衝突，原本的「相依套件不含渲染函式庫」
+ * 測試在 three.js 進入相依樹後必然失敗。
+ *
+ * 條文的**意圖**是「物理核心不得被渲染污染」，這一點在 Phase 1 依然成立而且更重要，
+ * 因此改為驗證**邊界**而非全域缺席，並在原地加強：
+ *   - `src/sim/`、`src/data/`、`src/replay/`、`tools/` 都不得出現渲染 API 或 import three
+ *   - three 與 Rapier 同規則，必須精確版本鎖定
+ *   - 只有 `src/render/` 與 `src/ui/` 允許碰渲染
+ *
+ * 此調整需經設計方追認（見交付報告）。
+ */
+describe('§11.6 渲染與物理核心的邊界', () => {
+  /** 唯二允許使用渲染 API 的目錄。 */
+  const RENDER_ALLOWED = [join(REPO_ROOT, 'src', 'render'), join(REPO_ROOT, 'src', 'ui')];
+
+  const headlessSources = [
     ...collectSourceFiles(join(REPO_ROOT, 'src')),
     ...collectSourceFiles(join(REPO_ROOT, 'tools')),
-  ];
+  ].filter((file) => !RENDER_ALLOWED.some((dir) => file.startsWith(dir)));
 
-  it('原始碼不含任何渲染 API', () => {
-    const offenders = sources.filter((file) => RENDERING_PATTERN.test(readFileSync(file, 'utf8')));
+  it('headless 部分（sim / data / replay / tools）不含任何渲染 API', () => {
+    const offenders = headlessSources.filter((file) =>
+      RENDERING_PATTERN.test(readFileSync(file, 'utf8')),
+    );
     expect(offenders.map((f) => relative(REPO_ROOT, f))).toEqual([]);
   });
 
-  it('相依套件不含任何渲染函式庫', () => {
-    const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-    };
-    const names = [
-      ...Object.keys(pkg.dependencies ?? {}),
-      ...Object.keys(pkg.devDependencies ?? {}),
-    ];
-    const rendering = names.filter((n) =>
-      /^(three|babylonjs|@babylonjs|pixi\.js|canvas|gl|regl|twgl|ogl|p5|phaser)/.test(n),
+  it('headless 部分不 import three 或任何渲染函式庫', () => {
+    const offenders = headlessSources.filter((file) =>
+      /from\s+'(three|babylonjs|@babylonjs|pixi\.js|regl|twgl|ogl|p5|phaser)/.test(
+        readFileSync(file, 'utf8'),
+      ),
     );
-    expect(rendering).toEqual([]);
+    expect(offenders.map((f) => relative(REPO_ROOT, f))).toEqual([]);
+  });
+
+  it('three.js 與 Rapier 同規則，以精確版本號鎖定', () => {
+    const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(pkg.dependencies['three']).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  /**
+   * §P1.4.2 的提示性測試：constants.ts 的內容改了但 physicsVersion 沒動就失敗。
+   *
+   * 這是**提醒**而非阻止 —— 純註解變更也會觸發，此時只需把新雜湊蓋回
+   * `src/data/version.ts` 的 `PHYSICS_CONSTANTS_SHA256`，不必升版。
+   * 若改的是會影響物理的數值，則兩者都要更新。
+   */
+  it('physicsVersion 與 constants.ts 的內容同步（§P1.4.2）', async () => {
+    const { createHash } = await import('node:crypto');
+    const source = readFileSync(join(REPO_ROOT, 'src', 'data', 'constants.ts'));
+    const actual = createHash('sha256').update(source).digest('hex');
+    expect(
+      actual,
+      `src/data/constants.ts 改變了。若是影響物理的變更，請把 src/data/version.ts 的 ` +
+        `PHYSICS_VERSION +1；無論如何都要把 PHYSICS_CONSTANTS_SHA256 更新為 ${actual}`,
+    ).toBe(PHYSICS_CONSTANTS_SHA256);
   });
 
   it('Rapier 版本以精確版本號鎖定', () => {

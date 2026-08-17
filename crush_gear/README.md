@@ -132,72 +132,40 @@ npm run check   # 以上三者
 
 ---
 
-## 場地（§5）
+## 物理模型
 
-Stadium 形（兩端半圓 + 中央矩形），整體 0.70 m (X) × 1.00 m (Z)。
+**規格與全部數值以 [SPEC.md](SPEC.md) 為準**，本檔不重複條文，只放實測結果與操作說明。
 
-| 參數 | 值 |
+| 主題 | 規格章節 |
 |---|---|
-| 半圓半徑 R | 0.35 m |
-| 中央直線段長度 L（沿 Z） | 0.30 m |
-| 圍欄高度 / 厚度 | 0.06 m / 0.05 m |
-| 地板厚度 | 0.20 m（單一矩形 cuboid，上表面 y = 0） |
-| 地板與圍欄 friction / restitution | 0.0 / 0.15 |
+| 場地（stadium 尺寸、26 段圍欄、地板） | [SPEC.md §5](SPEC.md) |
+| 車體（雙 collider、質量重心慣量、剛體屬性、懸吊、輪胎力模型） | [SPEC.md §6](SPEC.md) |
+| 投擲參數與合法範圍 | [SPEC.md §7](SPEC.md) |
+| 勝負判定 | [SPEC.md §8](SPEC.md) |
+| 決定性要求 | [SPEC.md §9](SPEC.md) |
+| 跨平台決定性 | [SPEC.md §16](SPEC.md) |
+| 渲染層與播放器 | [SPEC_PHASE1.md](SPEC_PHASE1.md) |
 
-圍欄內緣貼合 stadium 輪廓，由 **2 段直線 + 每端 12 段圓弧共 26 個 Fixed cuboid** 組成，
-相鄰段以 1.15 的重疊係數確保無縫隙（實測 1440 個方向 × 4 個高度共 5760 條射線，落空 0 次）。
+物理常數的唯一來源是 [src/data/constants.ts](src/data/constants.ts)；
+`tests/acceptance.test.ts` 會在該檔內容改變而 `PHYSICS_VERSION` 未升時失敗提醒（SPEC.md §17）。
 
-地板刻意使用單一矩形而非貼合輪廓：出界以距離函數判定，地板形狀不影響任何結果。
+### 實測的湧現行為
 
----
-
-## 車體（§6）
-
-**單一 RigidBody 掛載兩個 collider**，這個結構直接是 Phase 2 零件系統的原型
-（底盤 = `core`，前武器 = `attack`）。
-
-| 部件 | 形狀 | 尺寸 | 質量 |
-|---|---|---|---|
-| 底盤 chassis | cuboid | 0.070 × 0.025 × 0.100 m，位移 (0, 0.0025, 0) | 0.11 kg |
-| 前武器 weapon | convex hull | 自 z = 0.050 延伸至 0.100，刃口寬 0.008 m | 0.04 kg |
-
-**質量、重心、慣量三者全部由幾何與質量分配衍生，不人為指定任何一項。**
-只對兩個 collider 分別 `setMass()`，其餘交給 Rapier 合成：
-
-```
-mass      0.150000 kg
-localCom  (0.000000, 0.002455, 0.017795)     略偏前上方
-inertia   Ixx = 2.3465e-4  Iyy = 2.7989e-4  Izz = 5.7787e-5  kg·m²
-```
-
-| 參數 | 值 |
-|---|---|
-| collider friction / restitution | 0.0 / 0.25 |
-| CCD | 啟用 |
-| 線速度上限 / 角速度上限 | 30 m/s / 400 rad/s |
-| 輪距 / 軸距 | 0.056 m / 0.070 m |
-| 懸吊 restLength / maxTravel / k / c | 0.025 m / 0.020 m / 300 N/m / 2.0 Ns/m |
-| 輪胎 wheelSurfaceSpeed / μ | 4.0 m/s / 0.30 |
-
-clamp 只負責攔截數值發散，**不得參與遊戲**：500 場隨機投擲中線速度與角速度的
-clamp 觸發次數皆為 0。統計基線的迴歸偵測由 `tests/acceptance.test.ts` 負責，兩者不混用。
-
-**摩擦力全部由輪胎模型提供。** 地板與車體的 collider friction 都刻意設為 0，
-避免雙重摩擦來源導致調參時無法判斷力的出處。
-
-輪胎恆處於滑動摩擦狀態，因此摩擦力永遠是 Coulomb 飽和上限 `F = μN`、各向同性、
-與馬達扭力無關，不需要任何輪胎模型（Pacejka 等）。實測的湧現行為：
+輪胎恆處於滑動摩擦狀態，因此摩擦力永遠是 Coulomb 飽和上限 `F = μN`、各向同性
+（SPEC.md §6.5）。以下行為是模擬的自然結果，**不是額外程式碼造出來的**：
 
 - 車輛不沿車頭方向直線行進，慣性主導、明顯漂移
 - 被撞擊後長時間自轉打滑
 - 自由加速 0.5 秒後速度 **1.461 m/s**，與理論上限 `μg·t = 1.472 m/s` 相符
 - 直線行駛時底盤幾乎不晃：0.5 秒內最大傾角 0.76°，行駛高度穩定在 29.0 mm
-- 翻覆臨界 μ = **0.897**（`trackWidth / (2·cogHeight)`），高於 μ = 0.30，
-  因此不會單靠橫向摩擦自行翻覆；翻覆來自碰撞與前武器的掀擊
+- 翻覆臨界 μ = **0.897**，高於 μ = 0.30，因此不會單靠橫向摩擦自行翻覆
+- 500 場隨機投擲中，線速度與角速度的 clamp 觸發次數皆為 **0**
 
 ---
 
-## 投擲參數（§7）
+## 投擲參數
+
+範圍與驗證規則見 [SPEC.md §7](SPEC.md)。超出範圍會在模擬開始前拋出 `RangeError`，不會靜默 clamp。
 
 ```json
 {
@@ -206,20 +174,6 @@ clamp 觸發次數皆為 0。統計基線的迴歸偵測由 `tests/acceptance.te
   "throwB": { "x": 0.25, "z": 0, "y": 0.05, "yaw": 4.7124, "pitch": 0, "speed": 2.5, "spin": 0 }
 }
 ```
-
-| 參數 | 意義 | 合法範圍 |
-|---|---|---|
-| `x` / `z` | 投入點水平座標（m） | `stadiumDistance(x, z) ≤ 0.27`，即距圍欄內緣至少 0.08 m |
-| `y` | 投入高度（m） | `[0.030, 0.15]` |
-| `yaw` | 車頭朝向，繞世界 +Y 軸（rad） | `[0, 2π)` |
-| `pitch` | 俯仰角（rad），**正值為機首上仰** | `[-0.3, 0.3]` |
-| `speed` | 初速大小（m/s），方向由 yaw 與 pitch 決定 | `[0, 5.0]` |
-| `spin` | 初始角速度，繞世界 +Y 軸（rad/s） | `[-20, 20]` |
-
-超出範圍的參數會在模擬開始前拋出 `RangeError`，不會靜默 clamp。
-
-`y` 的下界 0.030 恰好是**懸吊零壓縮**的高度（錨點 −0.005 + restLength 0.025），
-低於此值車體會生成在懸吊壓縮狀態並被彈起。實測靜態行駛高度為 0.02904 m。
 
 `sample_battles/` 內含展示不同結局的輸入檔：
 
@@ -231,6 +185,88 @@ clamp 觸發次數皆為 0。統計基線的迴歸偵測由 `tests/acceptance.te
 | `high_speed_head_on.json` | `B_WINS` / `FLIP` / 501 frames（兩車 5 m/s 正面對撞） |
 | `spec_example.json` | 規格書 §10 的範例輸入（投入點依 v1.1 §7 調整） |
 | `batch_example.json` | 批次模式範例 |
+
+---
+
+## Replay 與版本化
+
+規格見 [SPEC_PHASE1.md §P1.2–§P1.5](SPEC_PHASE1.md)（分離架構、軌跡格式、版本化、診斷輸出）
+與 [SPEC.md §17](SPEC.md)（`physicsVersion` 的升版規則）。以下是使用方式。
+
+```ts
+import { generateTrajectory, toReplayFile, loadReplay } from './src/replay/trajectory.js';
+
+const t = await generateTrajectory({ seed, throwA, throwB });
+// t.position[car]  Float32Array，長度 frameCount * 3（剛體原點，非質心）
+// t.rotation[car]  Float32Array，長度 frameCount * 4（四元數 x,y,z,w）
+// t.outcome        { result, reason, frames }
+
+const file = toReplayFile(t);   // 只存 meta，約 1 KB
+const again = await loadReplay(file);   // 版本不符時拋 IncompatibleReplayError
+```
+
+實測資料量：7200 幀雙車的軌跡 394 KB，診斷資料 1.68 MB。
+
+目前的物理身分（`src/data/version.ts`）：`PHYSICS_VERSION = 1`、
+`RAPIER_VERSION = 0.19.3`、`RAPIER_WASM_SHA256 = 1ce1c8c4…`。
+`constants.ts` 的內容雜湊也記在同一檔案，改了常數卻沒動 `PHYSICS_VERSION` 時，
+`tests/acceptance.test.ts` 會失敗提醒（是提醒而非阻止，純註解變更重新蓋章即可）。
+
+### 播放器
+
+```bash
+npm run dev     # http://localhost:5173
+```
+
+進站即自動載入第一個範例並播放。
+
+| 控制 | 說明 |
+|---|---|
+| 播放 / 暫停 / 重播 | |
+| 逐幀 ◀ / ▶ | 在第 0 幀與結束幀正確停住，不越界 |
+| 時間軸 | 拖曳至任意幀；拖曳後的狀態與從頭播到該幀完全相同 |
+| 速度 | 0.1× / 0.25× / 0.5× / 1× / 2×，慢速下仍是平滑插值而非跳格 |
+| 相機 | 全景 / 跟隨 A / 跟隨 B / 自由（滑鼠軌道） |
+
+時間推進以**真實經過時間**換算目標幀（模擬固定 120 Hz，顯示更新率不定），
+相鄰幀之間位置 lerp、旋轉 slerp。不以顯示幀直接對應模擬幀，
+因此播放速度不隨螢幕更新率漂移。
+
+### 除錯疊圖（§P1.8.2）
+
+六項可獨立切換，資料全部來自診斷的旁路記錄，疊圖只做「數值 → 幾何長度」的線性換算：
+
+| 疊圖 | 內容 |
+|---|---|
+| 四輪接地狀態 | 離地的輪子變色 |
+| **法向力 N** | 接觸點的柱狀指示，高度 ∝ N；車體傾斜時外側／內側輪的分配差異一眼可辨 |
+| **輪胎力向量** | 接觸點的箭頭，長度 ∝ 力的大小 |
+| 重心與 up vector | 質心標記與車體上方向 |
+| stadium 距離 | 由中心線到車體的連線，越過門檻時轉為警示色 |
+| FLIP 計數器 | 連續翻覆幀數 / 60，過半時轉為警示 |
+
+另有「顯示數值」開關，在接觸點旁標出 `N` 與 `F` 的實際數字。
+疊圖刻意關閉深度測試，否則接觸點在車底、柱與箭頭會被底盤整個擋住。
+
+實測一幀的讀數（`spec_example` 第 300 幀，車 A）：
+
+```
+N 0.382  F 0.115        F/N = 0.301
+N 0.264  F 0.079        F/N = 0.299
+N 0.422  F 0.127        F/N = 0.301
+N 0.305  F 0.091        F/N = 0.298
+                  ΣN = 1.373 N  （車重 m·g = 1.47 N）
+```
+
+四輪的 `F/N` 都等於 μ = 0.30 —— 摩擦力恆為 Coulomb 飽和上限（§6.4）在畫面上直接可讀。
+
+### 診斷輸出（§P1.5）
+
+`simulate(input, { diagnostics: true })` 額外記錄每幀每輪的接地狀態、法向力、
+輪胎力向量、接觸點，以及每車的 stadium 距離與 FLIP 計數器。
+這些是**旁路寫入** —— 只把已算出的中間值抄一份，不重新計算、不改變任何順序。
+關閉時（預設）執行路徑與 Phase 0 位元完全相同，已由 `tests/replay.test.ts`
+以逐幀 checksum 比對證明。
 
 ---
 
@@ -247,8 +283,21 @@ src/
     checksum.ts   狀態雜湊（FNV-1a 32-bit）
     simulate.ts   主模擬迴圈，對外唯一入口
     types.ts      共用型別定義與純向量／四元數運算
+    (trajectory / diagnostics 為旁路輸出，預設關閉)
   data/
     constants.ts  所有物理常數與場地尺寸
+    version.ts    physicsVersion 與物理身分（§P1.4）
+  replay/
+    trajectory.ts 軌跡組裝、replay 檔、相容性檢查（sim 與 render 之間的一層）
+  render/
+    scene.ts      場地與燈光（圍欄直接重用 sim 的 buildFenceSegments）
+    vehicle.ts    車體 mesh（底盤 box、前武器凸包、四輪）
+    player.ts     播放核心（真實時間 → 目標幀，lerp / slerp 插值）
+    overlay.ts    除錯疊圖（§P1.8.2 六項）
+    visual.ts     純視覺常數（顏色、光照、比例；不含任何物理尺寸）
+    main.ts       進入點
+  ui/
+    controls.ts   原生 DOM 播放控制
 tools/
   sim.ts              CLI 入口（唯一允許 I/O 的一層）
   pool.ts             批次模擬的 worker pool
@@ -257,6 +306,9 @@ tools/
 tests/
   determinism.test.ts   §9 決定性 / §11.1 / §1.3 平行化一致性
   acceptance.test.ts    §6 幾何驗證 / §11.2 ~ §11.7
+  replay.test.ts        Phase 1 P1-a：軌跡、診斷、版本化
+  render.test.ts        Phase 1 P1-b：幾何同步、判定一致、五類結局
+  overlay.test.ts       Phase 1 P1-c/d：播放控制、疊圖換算
 fixtures/
   platform/             §16 的 20 組 fixture + 已簽入的參考 baseline.json
   benchmark-500.json    §11.5a 的基準批次
@@ -269,54 +321,23 @@ sample_battles/
 也不得做任何檔案讀寫或主控台輸出。此約束由 `eslint.config.js` 的規則強制，
 並由 `tests/acceptance.test.ts` 的靜態掃描複驗。
 
----
+### 分層與渲染邊界
 
-## 勝負判定（§8）
-
-每幀檢查，優先序 OUT → FLIP → TIMEOUT：
-
-| 判定 | 條件 |
-|---|---|
-| `OUT` | `stadiumDistance(cx, cz) > 0.45` 或 `cy < -0.10` |
-| `FLIP` | 車體 up vector 與世界 +Y 內積 `< 0`，且**持續 60 幀** |
-| `TIMEOUT` | 達 7200 幀（60 秒）仍無勝負，判定為 `DRAW` |
-
-```ts
-function stadiumDistance(x: number, z: number): number {
-  const dz = Math.max(-0.15, Math.min(0.15, z));
-  const dzz = z - dz;
-  return Math.sqrt(x * x + dzz * dzz);
-}
+```
+data  ←  sim  ←  replay  ←  render  ←  ui
 ```
 
-此處刻意不使用 `Math.hypot`（§3 禁令 7）：它的精度是實作定義的，而本函式在每幀熱路徑上
-決定出界判定 → 終止幀 → checksum 陣列長度，跨平台一個 ULP 的差異就足以讓勝負不一致。
-詳見 [src/sim/judge.ts](src/sim/judge.ts) 的註解。
+相依只能由右往左。條文與理由見 [SPEC.md §2](SPEC.md)（分層）、
+[SPEC.md §11.6](SPEC.md)（渲染邊界）、[SPEC_PHASE1.md §P1.6](SPEC_PHASE1.md)（`src/replay/` 的存在理由）。
 
-雙方於同一幀滿足敗北條件時判定為 `DRAW`；此時 `reason` 取優先序較高者，
-即只要任一方是 `OUT` 就記為 `OUT`（§14.7）。
-
----
-
-## 決定性（§9）
-
-- 亂數只能來自 `src/sim/rng.ts` 的 xoshiro128\*\*，全程以 32-bit 整數運算推進
-- 模擬迴圈以整數幀計數推進，不依賴實際經過時間
-- 剛體建立順序固定：地板 → 圍欄直線段（−X、+X）→ +Z 端 12 段弧（θ 遞增）→
-  −Z 端 12 段弧（θ 遞增）→ 車 A（底盤 → 前武器）→ 車 B
-- 力的施加順序固定：車 A 的 4 個輪位（依 `WHEEL_ANCHORS` 陣列順序）→ 車 B 的 4 個輪位；
-  每輪先施加懸吊力再施加輪胎力
-- checksum 以 FNV-1a 32-bit 計算，所有浮點數先量化為 `Math.round(v * 1e6) | 0`
-- 雜湊涵蓋範圍依固定順序：車 A 的質心位置、旋轉四元數、線速度、角速度 →
-  車 B 同上 → RNG 內部狀態的 4 個 u32
-- 取樣頻率：每 60 幀一次，加上結束幀必記一次
+實作以 ESLint 的 `no-restricted-imports` / `no-restricted-globals` 強制，
+並由 `tests/acceptance.test.ts` 的靜態掃描複驗。
 
 ---
 
-## 跨平台決定性（§16）
+## 跨平台決定性
 
-本專案的線上架構（以 seed + 投擲參數取代連線同步）完全建立在跨平台一致性之上。
-剛體碰撞是混沌系統，1e-15 的浮點差異在數百幀後會演變為完全不同的勝負。
+要求與驗證方式見 [SPEC.md §16](SPEC.md)。以下是實測結果。
 
 **已驗證的本機結果**（win32 / x64 / Node 24.14.0 / V8 13.6，Rapier 0.19.3）：
 
@@ -330,18 +351,7 @@ function stadiumDistance(x: number, z: number): number {
 | 單執行緒 V8（`--single-threaded`） | 20/20 一致 |
 
 兩套完全不同的機器碼產生器對同一份 wasm 產生位元相同的結果，代表分歧不會來自 codegen 層。
-
-**支持跨平台一致的結構性事實：**
-
-- Rapier 的 wasm **不 import 任何 JS 數學函式**，所有浮點運算都編譯在 wasm 內；
-  WebAssembly 規範要求 f32/f64 運算位元精確（IEEE-754、round-to-nearest-even、
-  無延伸精度、無 FMA 合併）
-- 該 wasm build **不使用 SIMD**（type section 內完全沒有 v128），
-  因此不存在 SIMD／純量路徑分歧的問題。CI 有一道檢查會在 Rapier 換成 SIMD build 時擋下來
-- 本專案 JS 端的每幀熱路徑**只用到 `+ - * /` 與 `Math.sqrt`**，全部是 IEEE-754 要求
-  正確捨入的運算，不含任何精度為實作定義的函式。`Math.sin` / `cos` / `tan` 只在
-  世界佈局與初始姿態計算中使用（建構期，結果不隨幀累積）。
-  此約束由 §3 禁令 7 的 ESLint 規則（`no-restricted-properties`）在 `src/sim/` 強制
+支持一致性的三項結構性事實見 [SPEC.md §16.4](SPEC.md)。
 
 **多架構矩陣結果：8/8 全綠**（2026-08-17）。Linux x64 產生的 baseline，在 macOS arm64、
 Windows x64 上跑同一套 20 組 fixture（44,802 幀），checksum 陣列**位元完全相同**。
@@ -429,7 +439,7 @@ CI 由該 repo 根目錄的 `.github/workflows/crush-gear-platform-determinism.y
 | 4 | 出界可觸發 | ✅ | 500 場中 297 場以 OUT 收場；`a_wins_out.json` 穩定重現 |
 | 5a | 批次吞吐：500 場平行執行於 30 秒內 | ✅ | **7.69 秒**（12 workers） |
 | 5b | 單場成本：單執行緒 ≤ 50 µs/car-frame | ✅ | **20.44 µs/car-frame** |
-| 6 | 無渲染碼 | ✅ | 靜態掃描 + 相依樹檢查通過 |
+| 6 | 渲染邊界（Phase 1 修訂） | ✅ | 見下方條文；靜態掃描 + ESLint 通過 |
 | 7 | ESLint 通過 | ✅ | 無違例 |
 | 8 | 跨平台一致（≥3 種平台組合，含 arm64 與非 Linux） | ✅ | CI matrix 8/8 全綠：ubuntu / macos-arm64 / windows × Node 20 / 22 + codegen tiers |
 

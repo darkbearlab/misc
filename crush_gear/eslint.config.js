@@ -135,12 +135,14 @@ export default tseslint.config(
       // TypeScript 自己就會抓未定義的識別字，開 no-undef 只會誤報。
       'no-undef': 'off',
       'no-restricted-syntax': ['error', ...GLOBAL_BANS],
+      // §11.6（Phase 1 重新界定範圍）：渲染函式庫只允許出現在 src/render 與 src/ui，
+      // 其餘一律禁止。下方有針對那兩個目錄的解除規則。
       'no-restricted-imports': [
         'error',
         {
           paths: RENDERING_PACKAGES.map((name) => ({
             name,
-            message: '§11.6 全專案不含任何渲染相關依賴或程式碼。',
+            message: '§11.6：渲染函式庫只允許出現在 src/render/ 與 src/ui/。',
           })),
         },
       ],
@@ -217,10 +219,81 @@ export default tseslint.config(
   },
 
   {
-    // tools/ 是唯一允許 I/O 的一層；tests/ 需要量測牆上時間來驗收 §11.5。
+    /**
+     * §P1.6：模擬核心不得反向依賴上層。
+     *
+     * `src/sim/` 與 `src/data/` 是最底層，只能被往上依賴。一旦它們 import 了
+     * replay 或 render，「渲染在架構上不可能影響物理」這個 §P1.2.1 的結構性保證就破了。
+     */
+    files: ['src/sim/**/*.ts', 'src/data/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/replay/**', '**/render/**', '**/ui/**', 'three', 'three/*'],
+              message:
+                '§P1.6：src/sim 與 src/data 不得依賴 replay / render / ui 或任何渲染函式庫。',
+            },
+          ],
+          paths: RENDERING_PACKAGES.map((name) => ({
+            name,
+            message: '§11.6 全專案不含任何渲染相關依賴或程式碼。',
+          })),
+        },
+      ],
+    },
+  },
+
+  {
+    /**
+     * `src/replay/` 是 sim 之上、render 之下的一層：
+     * 組裝 TrajectoryMeta（需要牆上時間）與判斷 replay 的相容性。
+     * 它不做 I/O、不碰瀏覽器 API，因此 tools/ 與 render/ 都能使用。
+     */
+    files: ['src/replay/**/*.ts'],
+    rules: {
+      'no-console': 'error',
+      'no-restricted-globals': [
+        'error',
+        ...BROWSER_GLOBALS.map((name) => ({
+          name,
+          message: `§P1.6：src/replay 不得使用瀏覽器 API（${name}），它同時服務 CLI 與渲染層。`,
+        })),
+      ],
+    },
+  },
+
+  {
+    /**
+     * §P1.6：`src/render/` 與 `src/ui/` 是唯二允許使用瀏覽器 API 與渲染函式庫的地方。
+     *
+     * 它們仍受 §3.1（禁止未受控的隨機來源）約束 —— 隨機投擲一樣要走 `src/sim/rng.ts`。
+     * 而 §3 禁令 7（實作定義的數學函式）不適用於此：渲染層的數學不進 checksum，
+     * 也不隨幀累積，跨平台差異在這裡沒有後果。
+     */
+    files: ['src/render/**/*.ts', 'src/ui/**/*.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
+      'no-restricted-globals': 'off',
+      'no-restricted-properties': 'off',
+      'no-console': 'error',
+    },
+  },
+
+  {
+    // tools/ 是唯一允許 I/O 的一層；tests/ 需要量測牆上時間來驗收 §11.5，
+    // 也需要 import three 來驗證渲染層的幾何同步（§P1.10-5）。
     files: ['tools/**/*.ts', 'tests/**/*.ts'],
     rules: {
       'no-console': 'off',
+    },
+  },
+  {
+    files: ['tests/**/*.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 );

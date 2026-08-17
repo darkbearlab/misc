@@ -25,7 +25,10 @@ import type {
   SimOptions,
   SimResult,
   ThrowParams,
+  TrajectoryDiagnostics,
+  TrajectoryFrames,
   VehicleStateDump,
+  WheelDiagnosticsWriter,
 } from './types.js';
 import { Vehicle } from './vehicle.js';
 import { createWorld, initPhysics } from './world.js';
@@ -108,6 +111,67 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
       checksums.push(currentChecksum());
     };
 
+    // ── §P1.3 / §P1.5 旁路記錄 ──────────────────────────────────────────
+    // 兩者都只是把既有的計算結果抄一份出來。緩衝區以最長場次配置，結束時再截斷，
+    // 迴圈內不做任何配置，也不影響任何力的施加順序。
+    const capacity = TIMEOUT_FRAMES + 1;
+    const wantTrajectory = options.trajectory === true;
+    const wantDiagnostics = options.diagnostics === true;
+
+    const position = wantTrajectory
+      ? [new Float32Array(capacity * 3), new Float32Array(capacity * 3)]
+      : null;
+    const rotation = wantTrajectory
+      ? [new Float32Array(capacity * 4), new Float32Array(capacity * 4)]
+      : null;
+
+    const diagWriters: WheelDiagnosticsWriter[] | null = wantDiagnostics
+      ? vehicles.map(() => ({
+          grounded: new Uint8Array(capacity * 4),
+          normalForce: new Float32Array(capacity * 4),
+          tireForce: new Float32Array(capacity * 4 * 3),
+          contactPoint: new Float32Array(capacity * 4 * 3),
+          frame: 0,
+        }))
+      : null;
+    const stadiumDist = wantDiagnostics
+      ? [new Float32Array(capacity), new Float32Array(capacity)]
+      : null;
+    const flipCounter = wantDiagnostics
+      ? [new Uint16Array(capacity), new Uint16Array(capacity)]
+      : null;
+
+    const recordTrajectory = (currentFrame: number): void => {
+      if (position === null || rotation === null) return;
+      for (let v = 0; v < vehicles.length; v += 1) {
+        const vehicle = vehicles[v] as Vehicle;
+        const t = vehicle.translation();
+        const p = position[v] as Float32Array;
+        const o = currentFrame * 3;
+        p[o] = t.x;
+        p[o + 1] = t.y;
+        p[o + 2] = t.z;
+
+        const q = vehicle.orientation();
+        const r = rotation[v] as Float32Array;
+        const o4 = currentFrame * 4;
+        r[o4] = q.x;
+        r[o4 + 1] = q.y;
+        r[o4 + 2] = q.z;
+        r[o4 + 3] = q.w;
+      }
+    };
+
+    /** 每輪的資料由 applyWheelForces 旁路寫入；這裡只補車體層級的兩項。 */
+    const recordVehicleDiagnostics = (currentFrame: number): void => {
+      if (stadiumDist === null || flipCounter === null) return;
+      for (let v = 0; v < vehicles.length; v += 1) {
+        const com = (vehicles[v] as Vehicle).centerOfMass();
+        (stadiumDist[v] as Float32Array)[currentFrame] = stadiumDistance(com.x, com.z);
+        (flipCounter[v] as Uint16Array)[currentFrame] = judge.flipFrames(v);
+      }
+    };
+
     const toDump = (v: Vehicle): VehicleStateDump => {
       const s = v.checksumState();
       return {
@@ -141,13 +205,20 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
     recordChecksum();
     recordDiagnostics(frame);
     sampleStats();
+    recordTrajectory(frame);
 
     // 第 0 幀（投入瞬間）也依約定檢查一次；合法的投擲參數不可能在此觸發任何條件。
     let outcome = judge.update(frame, vehicleA.judgeState(), vehicleB.judgeState());
+    recordVehicleDiagnostics(frame);
 
     while (outcome === null && frame < TIMEOUT_FRAMES) {
-      vehicleA.applyWheelForces(world, DT);
-      vehicleB.applyWheelForces(world, DT);
+      if (diagWriters !== null) {
+        // 第 0 幀沒有輪力（力施加於 frame → frame+1 的推進），因此輪診斷自第 1 幀起記錄。
+        (diagWriters[0] as WheelDiagnosticsWriter).frame = frame + 1;
+        (diagWriters[1] as WheelDiagnosticsWriter).frame = frame + 1;
+      }
+      vehicleA.applyWheelForces(world, DT, diagWriters?.[0]);
+      vehicleB.applyWheelForces(world, DT, diagWriters?.[1]);
 
       world.step();
       frame += 1;
@@ -167,10 +238,35 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
       if (isSampleFrame) recordChecksum();
       if (outcome !== null && !isSampleFrame) recordChecksum();
       recordDiagnostics(frame);
+      recordTrajectory(frame);
+      recordVehicleDiagnostics(frame);
     }
 
     // 理論上不可達：judge 在 frame === TIMEOUT_FRAMES 時必定回傳 DRAW/TIMEOUT。
     const finalOutcome = outcome ?? { result: 'DRAW' as const, reason: 'TIMEOUT' as const };
+
+    const frameCount = frame + 1; // 含第 0 幀
+    const trajectory: TrajectoryFrames | undefined =
+      position === null || rotation === null
+        ? undefined
+        : {
+            frameCount,
+            position: position.map((a) => a.subarray(0, frameCount * 3)),
+            rotation: rotation.map((a) => a.subarray(0, frameCount * 4)),
+          };
+
+    const diagnostics: TrajectoryDiagnostics | undefined =
+      diagWriters === null || stadiumDist === null || flipCounter === null
+        ? undefined
+        : {
+            wheelGrounded: diagWriters.map((w) => w.grounded.subarray(0, frameCount * 4)),
+            normalForce: diagWriters.map((w) => w.normalForce.subarray(0, frameCount * 4)),
+            tireForce: diagWriters.map((w) => w.tireForce.subarray(0, frameCount * 4 * 3)),
+            contactPoint: diagWriters.map((w) => w.contactPoint.subarray(0, frameCount * 4 * 3)),
+            stadiumDist: stadiumDist.map((a) => a.subarray(0, frameCount)),
+            flipCounter: flipCounter.map((a) => a.subarray(0, frameCount)),
+            localCenterOfMass: vehicles.map((v) => v.localCenterOfMass()),
+          };
 
     return {
       result: finalOutcome.result,
@@ -179,6 +275,8 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
       checksums,
       ...(denseChecksums !== null ? { denseChecksums } : {}),
       ...(capturedState !== undefined ? { capturedState } : {}),
+      ...(trajectory !== undefined ? { trajectory } : {}),
+      ...(diagnostics !== undefined ? { diagnostics } : {}),
       stats: {
         maxComY,
         maxLinearSpeed,

@@ -53,6 +53,7 @@ import {
   type ThrowParams,
   type Vec3,
   type VehicleJudgeState,
+  type WheelDiagnosticsWriter,
 } from './types.js';
 import type { VehicleChecksumState } from './checksum.js';
 
@@ -267,8 +268,12 @@ export class Vehicle {
    *   7. 沿命中法線方向施加大小為 N 的力於接觸點
    *
    * 力以 `applyImpulseAtPoint(F · dt, p)` 施加，dt 為固定步長。
+   *
+   * @param diag 選用的診斷旁路寫入端（§P1.5）。傳入時只會多做幾筆 typed array 寫入，
+   *   不改變任何計算內容或順序；不傳時整條路徑與 Phase 0 位元完全相同。
    */
-  applyWheelForces(world: World, dt: number): void {
+  applyWheelForces(world: World, dt: number, diag?: WheelDiagnosticsWriter): void {
+    const diagBase = diag === undefined ? 0 : diag.frame * WHEEL_ANCHORS.length;
     const body = this.body;
     const s = this.state;
     const translation: Vec3 = { x: s.tx, y: s.ty, z: s.tz };
@@ -324,6 +329,14 @@ export class Vehicle {
       const contact = add(anchorWorld, scale(suspensionDown, distance));
       const contactVelocity = add(linvel, cross(angvel, sub(contact, com)));
 
+      if (diag !== undefined) {
+        const w = diagBase + i;
+        diag.grounded[w] = 1;
+        diag.contactPoint[w * 3] = contact.x;
+        diag.contactPoint[w * 3 + 1] = contact.y;
+        diag.contactPoint[w * 3 + 2] = contact.z;
+      }
+
       // 4. 懸吊軸速度分量：沿車體 +Y 為正，車體下沉時為負 → 阻尼項增大 N，抵抗壓縮
       const suspensionVelocity = dot(contactVelocity, suspensionUp);
 
@@ -332,6 +345,7 @@ export class Vehicle {
         0,
         SUSPENSION_STIFFNESS * compression - SUSPENSION_DAMPING * suspensionVelocity,
       );
+      if (diag !== undefined) diag.normalForce[diagBase + i] = normalForce;
       if (normalForce <= 0) continue;
 
       // 7. 懸吊力沿命中法線
@@ -347,7 +361,25 @@ export class Vehicle {
         frictionCoef: TIRE_FRICTION_COEF,
       });
       body.applyImpulseAtPoint(scale(force, dt), contact, true);
+
+      if (diag !== undefined) {
+        const w = (diagBase + i) * 3;
+        diag.tireForce[w] = force.x;
+        diag.tireForce[w + 1] = force.y;
+        diag.tireForce[w + 2] = force.z;
+      }
     }
+  }
+
+  /** 目前快取的剛體原點位移（渲染用；與質心不同，見 TrajectoryFrames 註解）。 */
+  translation(): Vec3 {
+    const s = this.state;
+    return { x: s.tx, y: s.ty, z: s.tz };
+  }
+
+  /** 目前快取的旋轉四元數。 */
+  orientation(): Quat {
+    return this.rotation();
   }
 
   /**
@@ -408,6 +440,15 @@ export class Vehicle {
   angularSpeed(): number {
     const s = this.state;
     return Math.sqrt(s.wx * s.wx + s.wy * s.wy + s.wz * s.wz);
+  }
+
+  /**
+   * 車體局部座標的質心（整場固定），由 Rapier 依兩個 collider 的質量分佈合成。
+   * 純讀取，僅供 §P1.5 的疊圖標示重心位置使用。
+   */
+  localCenterOfMass(): Vec3 {
+    const c = this.body.localCom();
+    return { x: c.x, y: c.y, z: c.z };
   }
 
   /** 質心世界座標。 */

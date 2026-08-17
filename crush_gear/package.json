@@ -9,21 +9,27 @@
   },
   "scripts": {
     "sim": "tsx tools/sim.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {
-    "@dimforge/rapier3d-compat": "0.19.3"
+    "@dimforge/rapier3d-compat": "0.19.3",
+    "three": "0.185.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
     "@types/node": "^24.10.1",
+    "@types/three": "0.185.4",
     "eslint": "^9.39.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
+    "vite": "7.3.6",
     "vitest": "^3.2.4"
   }
 }

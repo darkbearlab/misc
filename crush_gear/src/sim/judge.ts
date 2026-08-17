@@ -56,6 +56,16 @@ export class Judge {
   private flipFramesB = 0;
 
   /**
+   * 目前的連續翻覆幀數（唯讀），供 §P1.5 的除錯疊圖顯示「快要 FLIP 了」。
+   * 純讀取，不影響判定。
+   *
+   * @param index 0 = 車 A，1 = 車 B
+   */
+  flipFrames(index: number): number {
+    return index === 0 ? this.flipFramesA : this.flipFramesB;
+  }
+
+  /**
    * 檢查一幀。回傳 `null` 代表尚未分出勝負。
    *
    * @param frame 目前已推進的幀數（第 0 幀為投入瞬間，尚未 step）。
