@@ -343,24 +343,18 @@ function stadiumDistance(x: number, z: number): number {
   世界佈局與初始姿態計算中使用（建構期，結果不隨幀累積）。
   此約束由 §3 禁令 7 的 ESLint 規則（`no-restricted-properties`）在 `src/sim/` 強制
 
-**尚未執行的部分：** 真正的多架構矩陣（arm64、非 Linux、多個 Node 版本）需要 CI 或 Docker，
-本開發環境兩者皆不可用。`.github/workflows/platform-determinism.yml` 已就緒，
-涵蓋 ubuntu / macos(arm64) / windows × Node 20 / 22 共 6 種組合，
-推上 GitHub 後即可執行。**§11.8 在該矩陣綠燈之前不算通過。**
+**多架構矩陣結果：8/8 全綠**（2026-08-17）。Linux x64 產生的 baseline，在 macOS arm64、
+Windows x64 上跑同一套 20 組 fixture（44,802 幀），checksum 陣列**位元完全相同**。
+跨 CPU 架構、跨作業系統、跨 Node/V8 版本皆成立 ——
+**seed 同步的線上架構假設成立，不需改為錄製回放。**
 
-Rapier 版本或 wasm build 變更後，所有跨平台驗證須重跑。
+Rapier 版本或 wasm build 變更後，所有跨平台驗證須重跑；CI 為常態執行，作為升級時的迴歸防線。
 
-### §11.8 執行步驟（需設計方操作）
+### §11.8 執行方式
 
-```bash
-git init
-git add -A
-git commit -m "Phase 0: deterministic battle simulator"
-gh repo create <name> --private --source=. --push
-```
-
-推送後於 GitHub Actions 確認 `platform determinism` workflow 的 7 個 job 全綠
-（6 種平台組合 + codegen tier）。
+專案託管於 `darkbearlab/misc` 的 `crush_gear/` 子目錄，
+CI 由該 repo 根目錄的 `.github/workflows/crush-gear-platform-determinism.yml` 驅動
+（原因見下方說明）。手動觸發用 GitHub Actions 頁面的 `workflow_dispatch`。
 
 > ⚠️ **若本專案是以子目錄形式放在別的 repo 裡**（例如 `<repo>/crush_gear/`），
 > GitHub Actions **不會**執行 `crush_gear/.github/workflows/` 底下的 workflow ——
@@ -386,7 +380,7 @@ gh repo create <name> --private --source=. --push
 > 本目錄下的 `.github/workflows/platform-determinism.yml` 保留原樣，
 > 供日後搬到獨立 repo 時直接使用。
 >
-> **在 workflow 實際跑完且全綠之前，§11.8 都不算通過。**
+> 此適配版已於 2026-08-17 實際執行並全綠。
 
 送出前的兩項檢查（本 repo 已確認通過）：
 
@@ -395,27 +389,31 @@ gh repo create <name> --private --source=. --push
 | `package-lock.json` 已納入版本控制（未提交會讓 CI 安裝到不同的 wasm binary） | ✅ 存在，鎖定 `0.19.3` 與 integrity hash |
 | `fixtures/` 未被 `.gitignore` 排除 | ✅ `.gitignore` 內的 baseline 規則已錨定為 `/baseline.json`，不會誤傷 `fixtures/platform/baseline.json` |
 
-### 結案記錄（待 §11.8 結果填入）
+### 結案記錄
 
 | 欄位 | 值 |
 |---|---|
-| Rapier 版本 | `@dimforge/rapier3d-compat@0.19.3` |
+| Rapier 版本 | `@dimforge/rapier3d-compat@0.19.3`（精確鎖定，`package-lock.json` 已納入版控） |
 | wasm SHA-256 | `1ce1c8c4036b4dcd3bde86c6efdb0f270cf5e274979b1de6ab8052947ef166c5` |
-| wasm 使用 SIMD | 否（type section 無 v128） |
+| wasm 使用 SIMD | 否（type section 無 v128；CI 有 guard 會在改為 SIMD build 時失敗） |
 | Fixture 組數 / 總幀數 | 20 組 / 44,802 幀 |
 | 參考 baseline | `fixtures/platform/baseline.json` |
+| CI run | [run #1](https://github.com/darkbearlab/misc/actions/runs/32045828668)，commit `919f0c3` |
 
 | 平台組合 | Node | arch | 結果 | 驗證日期 |
 |---|---|---|---|---|
-| win32（本機開發） | 24.14.0 | x64 | ✅ 20/20（含 5 種 codegen 路徑） | 2026-08-17 |
-| ubuntu-latest | 20 | x64 | ⏳ 待執行 | |
-| ubuntu-latest | 22 | x64 | ⏳ 待執行 | |
-| macos-latest | 20 | arm64 | ⏳ 待執行 | |
-| macos-latest | 22 | arm64 | ⏳ 待執行 | |
-| windows-latest | 20 | x64 | ⏳ 待執行 | |
-| windows-latest | 22 | x64 | ⏳ 待執行 | |
+| ubuntu-latest（baseline 產生者） | 20 | x64 | ✅ | 2026-08-17 |
+| ubuntu-latest | 22 | x64 | ✅ 20/20 | 2026-08-17 |
+| **macos-latest** | 20 | **arm64** | ✅ 20/20 | 2026-08-17 |
+| **macos-latest** | 22 | **arm64** | ✅ 20/20 | 2026-08-17 |
+| windows-latest | 20 | x64 | ✅ 20/20 | 2026-08-17 |
+| windows-latest | 22 | x64 | ✅ 20/20 | 2026-08-17 |
+| codegen tiers（Liftoff / TurboFan / no-tier-up / no-opt） | 20 | x64 | ✅ | 2026-08-17 |
+| win32（本機開發，含 5 種 codegen 路徑） | 24.14.0 | x64 | ✅ 20/20 | 2026-08-17 |
 
-若任一組分歧，依 v1.2 §7.5 停止並提出報告，**不得降低 checksum 精度或放寬比對容差**。
+**§11.8 通過，Phase 0 結案。**
+
+未來若任一組分歧，依 v1.2 §7.5 停止並提出報告，**不得降低 checksum 精度或放寬比對容差**。
 首要嫌疑順序：(1) 安裝到不同的 wasm binary（比對 SHA-256），(2) JS 端殘留的實作定義函式
 （§3 禁令 7 的 ESLint 規則應已排除），(3) Rapier 內部的平台相依路徑。
 
@@ -433,9 +431,9 @@ gh repo create <name> --private --source=. --push
 | 5b | 單場成本：單執行緒 ≤ 50 µs/car-frame | ✅ | **20.44 µs/car-frame** |
 | 6 | 無渲染碼 | ✅ | 靜態掃描 + 相依樹檢查通過 |
 | 7 | ESLint 通過 | ✅ | 無違例 |
-| 8 | 跨平台一致（≥3 種平台組合，含 arm64 與非 Linux） | ⏳ | 本機多 codegen 路徑全部一致；多架構矩陣待 CI 執行 |
+| 8 | 跨平台一致（≥3 種平台組合，含 arm64 與非 Linux） | ✅ | CI matrix 8/8 全綠：ubuntu / macos-arm64 / windows × Node 20 / 22 + codegen tiers |
 
-**Phase 0 在 §11.8 綠燈後結案。在此之前不開始 Phase 1 的任何實作。**
+**Phase 0 已結案**（§11.8 於 2026-08-17 通過）。
 
 19% 的戰鬥會進入沿圍欄的穩定漂移環繞而跑滿 60 秒時限。這是設計議題而非效能問題，
 已記入 [PHASE1_BACKLOG.md](PHASE1_BACKLOG.md) §15，**不在 Phase 0 實作範圍**。

@@ -340,17 +340,45 @@ Node 24 已移除 `--no-experimental-wasm-simd`（SIMD 已 ship），因此無�
 在 `src/sim/` 直接擋下 `Math.hypot` 等 19 個精度為實作定義的函式；
 `world.ts` 與 `types.ts` 為建構期例外，已在設定檔中逐一說明理由。
 
-### 4.5 未執行的部分
+### 4.5 多架構矩陣：8/8 全綠，§11.8 通過
 
-真正的多架構驗證（arm64、非 Linux、多個 Node 版本）需要 CI 或 Docker，
-**本開發環境兩者皆不可用**（`docker` 指令不存在，且此工作目錄不是 git repository）。
+2026-08-17 於 GitHub Actions 執行（[run #1](https://github.com/darkbearlab/misc/actions/runs/32045828668)，commit `919f0c3`）：
 
-`.github/workflows/platform-determinism.yml` 已備妥，涵蓋
-ubuntu-latest / macos-latest(arm64) / windows-latest × Node 20 / 22 共 6 種組合，
-外加一個 codegen tier 交叉比對 job。推上 GitHub 後即可執行。
+| Job | 平台 | Node | arch | 結果 | 耗時 |
+|---|---|---|---|---|---|
+| baseline（產生基準） | ubuntu-latest | 20 | x64 | ✅ | 19 s |
+| compare | ubuntu-latest | 20 | x64 | ✅ | 18 s |
+| compare | ubuntu-latest | 22 | x64 | ✅ | 14 s |
+| compare | **macos-latest** | 20 | **arm64** | ✅ | 20 s |
+| compare | **macos-latest** | 22 | **arm64** | ✅ | 14 s |
+| compare | windows-latest | 20 | x64 | ✅ | 43 s |
+| compare | windows-latest | 22 | x64 | ✅ | 49 s |
+| codegen-tiers | ubuntu-latest | 20 | x64 | ✅ | 36 s |
 
-**§11.8 在該矩陣綠燈之前不算通過。** 若出現分歧，依 §7.5 停止 Phase 0 後續工作並提出報告，
-不得降低 checksum 精度或放寬比對容差。
+**Linux x64 產生的 baseline，在 macOS arm64 與 Windows x64 上跑同一套 20 組 fixture
+（44,802 幀，含四場 7200 幀的混沌環繞），checksum 陣列位元完全相同。**
+
+這證實了 4.3 的結構性推論：因為 Rapier 的浮點運算全部走 WebAssembly 規範保證位元精確的路徑、
+不 import 任何 JS 數學函式、也不使用 SIMD，而 v1.3 之後 JS 端每幀熱路徑亦不含實作定義的運算，
+跨 CPU 架構、跨作業系統、跨 Node/V8 版本的一致性成立。
+
+**架構結論：以 seed + 投擲參數取代連線同步的線上架構假設成立，不需改為錄製回放。**
+
+CI 設為常態執行，作為 Rapier 升級時的迴歸防線；baseline job 另有一道 guard，
+會在 Rapier 換成 SIMD build 時直接失敗，強制重新驗證 §16。
+
+未來若出現分歧，依 §7.5 停止並提出報告，不得降低 checksum 精度或放寬比對容差。
+
+### 4.6 CI 部署上的一個坑
+
+專案位於 `darkbearlab/misc` 的 `crush_gear/` 子目錄，而
+**GitHub Actions 只讀取 repo 根目錄的 `.github/workflows/`** ——
+子目錄裡的 workflow 完全不會被載入，推上去也不會有任何 job，很容易誤以為「CI 綠燈」。
+
+解法是在 repo 根目錄放一份適配版（`.github/workflows/crush-gear-platform-determinism.yml`）：
+以 `defaults.run.working-directory: crush_gear` 切換 `run:` 步驟的工作目錄，
+但 `uses:` 步驟不受其影響，其 `path` 仍相對於 workspace 根目錄，
+因此 artifact 的路徑必須明寫 `crush_gear/` 前綴。
 
 ---
 
