@@ -365,21 +365,28 @@ gh repo create <name> --private --source=. --push
 > ⚠️ **若本專案是以子目錄形式放在別的 repo 裡**（例如 `<repo>/crush_gear/`），
 > GitHub Actions **不會**執行 `crush_gear/.github/workflows/` 底下的 workflow ——
 > Actions 只讀取 repo **根目錄**的 `.github/workflows/`。
-> 此時需在 repo 根目錄放一份 workflow，並為所有步驟指定工作目錄：
+> 此時需在 repo 根目錄另放一份適配版，重點是：
 >
 > ```yaml
 > on:
 >   push:
->     paths: ['crush_gear/**']
+>     paths: ['crush_gear/**', '.github/workflows/<檔名>.yml']
 >   workflow_dispatch:
 > defaults:
 >   run:
->     working-directory: crush_gear
+>     working-directory: crush_gear      # 只作用於 run: 步驟
 > ```
 >
-> 其餘 job / step 內容可直接沿用 `crush_gear/.github/workflows/platform-determinism.yml`
-> （`actions/upload-artifact` 與 `download-artifact` 的 `path` 需補上 `crush_gear/` 前綴）。
-> **在 workflow 實際跑起來之前，§11.8 都不算通過。**
+> `uses:` 步驟不受 `working-directory` 影響，其 `path` 一律相對於 workspace 根目錄，
+> 因此 `upload-artifact` 要寫 `crush_gear/baseline.json`、`download-artifact` 要寫 `path: crush_gear`。
+>
+> **目前的託管位置**：本專案位於 `darkbearlab/misc` 的 `crush_gear/` 子目錄，
+> 適配版 workflow 已存在於該 repo 根目錄的
+> `.github/workflows/crush-gear-platform-determinism.yml`。
+> 本目錄下的 `.github/workflows/platform-determinism.yml` 保留原樣，
+> 供日後搬到獨立 repo 時直接使用。
+>
+> **在 workflow 實際跑完且全綠之前，§11.8 都不算通過。**
 
 送出前的兩項檢查（本 repo 已確認通過）：
 

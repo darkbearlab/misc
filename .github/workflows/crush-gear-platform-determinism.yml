@@ -1,0 +1,118 @@
+name: crush_gear platform determinism
+
+# crush_gear SPEC v1.2 §16 / §11.8 —— 跨平台決定性驗證。
+#
+# 這份是 `crush_gear/.github/workflows/platform-determinism.yml` 的根目錄適配版。
+# GitHub Actions 只讀取 repo **根目錄**的 .github/workflows/，子目錄裡的 workflow 不會執行，
+# 因此本檔案存在於此，並以 defaults.run.working-directory 把所有 run 步驟切到 crush_gear/。
+#
+# 注意：`uses:` 步驟（checkout / setup-node / artifact）不受 working-directory 影響，
+# 它們的 path 一律相對於 workspace 根目錄，所以下面的 artifact path 都明寫了 crush_gear/ 前綴。
+#
+# crush_gear 的線上架構（以 seed + 投擲參數取代連線同步）完全建立在跨平台一致性之上。
+# 剛體碰撞是混沌系統，1e-15 的浮點差異在數百幀後會演變為完全不同的勝負。
+# 這個 workflow 是該假設的迴歸防線，Rapier 版本或 wasm build 變更後必須重跑。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crush_gear/**'
+      - '.github/workflows/crush-gear-platform-determinism.yml'
+  pull_request:
+    paths:
+      - 'crush_gear/**'
+      - '.github/workflows/crush-gear-platform-determinism.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: crush_gear
+
+jobs:
+  # ubuntu-latest + Node 20 產生 baseline，其餘組合下載後比對。
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Generate baseline (linux/x64, node 20)
+        run: npx tsx tools/verify-platform.ts --generate --out baseline.json
+      - name: Assert the Rapier wasm build still has no SIMD
+        # SIMD 與純量路徑的浮點結果不保證位元一致。目前的 rapier3d-compat 是非 SIMD build，
+        # 若哪天換成 SIMD build，整個 §16 必須重新驗證，因此在這裡把它擋下來。
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const fp = JSON.parse(readFileSync('baseline.json', 'utf8')).fingerprint;
+            console.log(JSON.stringify(fp, null, 2));
+            if (fp.rapierWasmUsesSimd !== false) {
+              console.error('Rapier wasm now uses SIMD - re-validate SPEC v1.2 section 16 before proceeding.');
+              process.exit(1);
+            }
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-baseline
+          path: crush_gear/baseline.json
+          retention-days: 30
+
+  compare:
+    needs: baseline
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x64 / glibc
+          - os: ubuntu-latest
+            node: 20
+          - os: ubuntu-latest
+            node: 22
+          # arm64 —— 最可能暴露浮點差異的環境
+          - os: macos-latest
+            node: 20
+          - os: macos-latest
+            node: 22
+          # x64 / MSVC toolchain
+          - os: windows-latest
+            node: 20
+          - os: windows-latest
+            node: 22
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: platform-baseline
+          # artifact 內只有 baseline.json 一個檔，落到 crush_gear/baseline.json
+          path: crush_gear
+      - name: Compare against baseline
+        run: npx tsx tools/verify-platform.ts --compare baseline.json
+
+  # 同一個 runner 上，以不同的 wasm 代碼產生路徑交叉比對。
+  # Liftoff（基準編譯器）與 TurboFan（最佳化編譯器）是兩套完全不同的機器碼產生器，
+  # 兩者結果一致，代表分歧不會來自 codegen 層。
+  codegen-tiers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx tsx tools/verify-platform.ts --generate --out baseline.json
+      - name: Liftoff only (wasm baseline compiler)
+        run: node --liftoff-only --import tsx tools/verify-platform.ts --compare baseline.json
+      - name: TurboFan only (no Liftoff)
+        run: node --no-liftoff --import tsx tools/verify-platform.ts --compare baseline.json
+      - name: No wasm tier-up
+        run: node --no-wasm-tier-up --import tsx tools/verify-platform.ts --compare baseline.json
+      - name: JS optimizer disabled
+        run: node --no-opt --import tsx tools/verify-platform.ts --compare baseline.json
