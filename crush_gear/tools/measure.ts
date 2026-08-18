@@ -95,7 +95,7 @@ export type SingleVehicleMeasurement = {
 export function measureSingleVehicle(physics?: PhysicsOverride): SingleVehicleMeasurement {
   const g = Math.abs(GRAVITY.y);
   const mu = physics?.tireFrictionCoef ?? TIRE_FRICTION_COEF;
-  const shape = resolveVehicle(physics?.vehicle);
+  const shape = resolveVehicle(physics?.vehicle, physics?.vehiclePreset);
   const anchorY = shape.wheelAnchors[0]?.[1] as number;
 
   const settleWorld = createWorld(resolveArena(physics));

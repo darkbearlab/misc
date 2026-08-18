@@ -15,11 +15,19 @@ import {
   THROW_LIMITS,
   TIMEOUT_FRAMES,
 } from '../data/constants.js';
-import { DEFAULT_ARENA, resolveArena, stadiumDistanceIn, type ResolvedArena } from './arena.js';
+import {
+  DEFAULT_ARENA,
+  MIN_SEPARATION_CLEARANCE,
+  resolveArena,
+  stadiumDistanceIn,
+  type ResolvedArena,
+} from './arena.js';
+import { checkSeparation } from './separation.js';
 import { checksumFrame } from './checksum.js';
 import { Judge } from './judge.js';
 import { Rng } from './rng.js';
 import type {
+  PhysicsOverride,
   BattleInput,
   SimOptions,
   SimResult,
@@ -30,7 +38,8 @@ import type {
   WheelDiagnosticsWriter,
 } from './types.js';
 import { Vehicle } from './vehicle.js';
-import { createWorld, initPhysics } from './world.js';
+import { resolveVehicle } from './vehicle-shape.js';
+import { createWorld, ENVIRONMENT_GROUPS, initPhysics } from './world.js';
 
 function checkRange(label: string, value: number, min: number, max: number, maxInclusive: boolean): void {
   if (!Number.isFinite(value)) {
@@ -78,37 +87,45 @@ export function validateThrowParams(
 export function validateBattleInput(
   input: BattleInput,
   arena: ResolvedArena = DEFAULT_ARENA,
+  physics?: PhysicsOverride,
 ): void {
   if (!Number.isInteger(input.seed)) {
     throw new RangeError(`BattleInput.seed must be an integer, got ${String(input.seed)}`);
   }
   validateThrowParams('throwA', input.throwA, arena);
   validateThrowParams('throwB', input.throwB, arena);
-  validateThrowSeparation(input, arena);
+  validateThrowSeparation(input, arena, physics);
 }
 
 /**
- * §7.2 兩車初始分離。
+ * §7.2 兩車初始分離(第四輪修訂)。
  *
- * 以**投擲點的水平距離**判定,不做碰撞體重疊檢測 —— 後者需要先建立世界才能判斷,
- * 會破壞「參數驗證先於模擬」的分層。保守外接圓(`2 × maxRadius`)已足以保證不重疊,
- * 多出的 `MIN_SEPARATION_CLEARANCE` 是容差。
+ * 以雙方 yaw 與各部件的 XZ 投影多邊形做 2D 判定,要求不重疊且最小間距
+ * ≥ `MIN_SEPARATION_CLEARANCE`。外接圓保留為快速預篩。詳見 `separation.ts`。
  *
- * 距離只取 XZ:兩車可以投在不同高度,但那不構成「分離」—— 落地後仍會重疊。
+ * 仍然是**純幾何**:不建立世界、不做碰撞查詢,因此「參數驗證先於模擬」的分層不變。
  *
  * `arena.minThrowSeparation` 為 0 時不檢查,即 `PHYSICS_VERSION = 1` 的凍結行為。
  */
-export function validateThrowSeparation(input: BattleInput, arena: ResolvedArena): void {
-  const required = arena.minThrowSeparation;
-  if (!(required > 0)) return;
-  const dx = input.throwA.x - input.throwB.x;
-  const dz = input.throwA.z - input.throwB.z;
-  const distance = Math.sqrt(dx * dx + dz * dz);
-  if (distance < required) {
+export function validateThrowSeparation(
+  input: BattleInput,
+  arena: ResolvedArena,
+  physics?: PhysicsOverride,
+): void {
+  if (!(arena.minThrowSeparation > 0)) return;
+
+  const shape = resolveVehicle(physics?.vehicle, physics?.vehiclePreset);
+  const result = checkSeparation(
+    shape,
+    { x: input.throwA.x, z: input.throwA.z, yaw: input.throwA.yaw },
+    { x: input.throwB.x, z: input.throwB.z, yaw: input.throwB.yaw },
+    MIN_SEPARATION_CLEARANCE,
+  );
+  if (!result.ok) {
     throw new RangeError(
-      `Throw points are ${distance.toFixed(4)} m apart horizontally; §7.2 requires at least ` +
-        `${String(required)} m (2 x vehicle max radius + clearance). ` +
-        `The two cars would spawn intersecting each other.`,
+      `Throw points leave only ${result.distance.toFixed(4)} m between the two vehicles; ` +
+        `§7.2 requires at least ${String(MIN_SEPARATION_CLEARANCE)} m of clearance between ` +
+        `their footprints. The two cars would spawn intersecting or touching.`,
     );
   }
 }
@@ -121,11 +138,17 @@ export function validateThrowSeparation(input: BattleInput, arena: ResolvedArena
  */
 export async function simulate(input: BattleInput, options: SimOptions = {}): Promise<SimResult> {
   const arena = resolveArena(options.physics);
-  validateBattleInput(input, arena);
+  validateBattleInput(input, arena, options.physics);
   await initPhysics();
 
   const rng = new Rng(input.seed);
-  const world = createWorld(arena);
+  // 輪武器不參與地面碰撞的對照組，需要環境擁有獨立的 membership 位元才擋得掉；
+  // 其餘情況一律不呼叫 setCollisionGroups，維持 v1 的執行路徑（見 world.ts）。
+  const shape = resolveVehicle(options.physics?.vehicle, options.physics?.vehiclePreset);
+  const world = createWorld(
+    arena,
+    shape.wheelWeaponHitsGround ? undefined : ENVIRONMENT_GROUPS,
+  );
 
   try {
     // §9.3 剛體建立順序固定：先車 A 後車 B。

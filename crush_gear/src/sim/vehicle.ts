@@ -31,7 +31,14 @@ import {
   WHEEL_SURFACE_SPEED,
 } from '../data/constants.js';
 import { tireForce } from './tire.js';
-import { resolveVehicle, type Point3, type ResolvedVehicle } from './vehicle-shape.js';
+import { VEHICLE_GROUPS, VEHICLE_ONLY_GROUPS } from './world.js';
+import {
+  partFootprint,
+  resolveVehicle,
+  WHEEL_WEAPON_NAMES,
+  type Point3,
+  type ResolvedVehicle,
+} from './vehicle-shape.js';
 import {
   add,
   cross,
@@ -57,34 +64,44 @@ const LOCAL_UP: Vec3 = { x: 0, y: 1, z: 0 };
 const AXIS_X: Vec3 = { x: 1, y: 0, z: 0 };
 const AXIS_Y: Vec3 = { x: 0, y: 1, z: 0 };
 
-function weaponPoints(hull: readonly Point3[]): Float32Array {
-  return new Float32Array(hull.flatMap((p) => [p[0], p[1], p[2]]));
-}
-
 /**
- * §6.3 的兩項幾何條件，加上 v1.0 §6.3 的刮地檢查。
+ * §6.3 的兩項幾何條件,加上 v1.0 §6.3 的刮地檢查。
  *
- * 1. 所有錨點必須落在底盤 collider 的水平投影內。
- *    v1.0 的錨點突出於車體之外，等於四個輪子懸空在車體外側 —— 那是幾何錯誤，
+ * 1. 所有錨點必須落在**某一個** collider 的水平投影內。
+ *    v1.0 的錨點突出於車體之外,等於四個輪子懸空在車體外側 —— 那是幾何錯誤,
  *    會讓錨點先於 collider 穿進障礙物。
- * 2. 錨點高度必須嚴格高於車體最低點。
- * 3. 靜態行駛高度下，車體最低點必須嚴格高於接觸面，否則車體會直接刮地。
  *
- * 另註（非斷言，但為設計上的巧合且值得記錄）：
- * 錨點與車體最低點的落差 0.005 = restLength − maxTravel，
- * 因此懸吊恰好用完 maxTravel 的行程時底盤才會觸地。
+ *    **第四輪放寬為「任一部件」而非「底盤」**:官方規格車的全寬由輪武器決定
+ *    (底盤/外殼僅 90 mm,輪武器伸到 136 mm),輪位在輪武器底下而不在底盤底下。
+ *    原本只檢查底盤是實作對「車體」的窄化,條件的意圖是「錨點不得在車體之外」,
+ *    改用部件聯集才是它真正要表達的。
+ * 2. 錨點高度必須嚴格高於車體最低點。
+ * 3. 靜態行駛高度下,車體最低點必須嚴格高於接觸面,否則車體會直接刮地。
  */
 export function assertVehicleGeometry(shape: ResolvedVehicle): void {
-  const half = shape.chassisHalfExtents;
   const lowestY = shape.lowestY;
 
   for (let i = 0; i < shape.wheelAnchors.length; i += 1) {
     const anchor = shape.wheelAnchors[i] as Point3;
 
-    if (Math.abs(anchor[0]) >= half.x || Math.abs(anchor[2]) >= half.z) {
+    const inside = shape.parts.some((part) => {
+      const poly = partFootprint(part);
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const [x, z] of poly) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (z < minZ) minZ = z;
+        if (z > maxZ) maxZ = z;
+      }
+      return anchor[0] > minX && anchor[0] < maxX && anchor[2] > minZ && anchor[2] < maxZ;
+    });
+    if (!inside) {
       throw new Error(
-        `Wheel anchor ${i} at (${anchor[0]}, ${anchor[2]}) lies outside the chassis footprint ` +
-          `(±${half.x}, ±${half.z}); the wheel would hang off the body.`,
+        `Wheel anchor ${i} at (${anchor[0]}, ${anchor[2]}) lies outside every collider's ` +
+          `horizontal projection; the wheel would hang off the body.`,
       );
     }
 
@@ -141,10 +158,12 @@ type FrameState = {
 
 export class Vehicle {
   readonly body: RigidBody;
-  /** 底盤 collider。建立順序固定為底盤 → 前武器（§9.3）。 */
-  readonly chassis: Collider;
-  /** 前武器 collider。 */
-  readonly weapon: Collider;
+  /**
+   * 各部件的 collider，順序與 shape.parts 相同且固定（§9.3）。
+   *
+   * v1 是 [底盤, 前武器]；第四輪的官方規格車是六個。
+   */
+  readonly colliders: readonly Collider[];
 
   private readonly ray: Ray;
   /**
@@ -182,7 +201,7 @@ export class Vehicle {
   readonly shape: ResolvedVehicle;
 
   constructor(world: World, params: ThrowParams, physics?: PhysicsOverride) {
-    const shape = resolveVehicle(physics?.vehicle);
+    const shape = resolveVehicle(physics?.vehicle, physics?.vehiclePreset);
     this.shape = shape;
     assertVehicleGeometry(shape);
 
@@ -202,30 +221,37 @@ export class Vehicle {
         .setCcdEnabled(true),
     );
 
-    this.chassis = world.createCollider(
-      RAPIER.ColliderDesc.cuboid(
-        shape.chassisHalfExtents.x,
-        shape.chassisHalfExtents.y,
-        shape.chassisHalfExtents.z,
-      )
-        .setTranslation(shape.chassisOffset.x, shape.chassisOffset.y, shape.chassisOffset.z)
-        .setMass(shape.chassisMass)
-        .setFriction(VEHICLE_FRICTION)
-        .setRestitution(VEHICLE_RESTITUTION),
-      this.body,
-    );
+    this.colliders = shape.parts.map((part) => {
+      const desc =
+        part.kind === 'cuboid'
+          ? RAPIER.ColliderDesc.cuboid(
+              part.halfExtents.x,
+              part.halfExtents.y,
+              part.halfExtents.z,
+            ).setTranslation(part.offset.x, part.offset.y, part.offset.z)
+          : RAPIER.ColliderDesc.convexHull(
+              new Float32Array(part.points.flatMap((p) => [p[0], p[1], p[2]])),
+            );
+      if (desc === null) {
+        throw new Error(`Failed to build the convex hull for vehicle part "${part.name}".`);
+      }
+      desc.setMass(part.mass).setFriction(VEHICLE_FRICTION).setRestitution(VEHICLE_RESTITUTION);
 
-    const weaponDesc = RAPIER.ColliderDesc.convexHull(weaponPoints(shape.weaponHull));
-    if (weaponDesc === null) {
-      throw new Error('Failed to build the front-weapon convex hull from WEAPON_HULL.');
-    }
-    this.weapon = world.createCollider(
-      weaponDesc
-        .setMass(shape.weaponMass)
-        .setFriction(VEHICLE_FRICTION)
-        .setRestitution(VEHICLE_RESTITUTION),
-      this.body,
-    );
+      // 輪武器不參與地面碰撞的對照組（§第四輪）。
+      //
+      // 以 collision group 的 filter 位元關掉「與地板/圍欄」那一組，車對車仍然照常。
+      // 這是 Rapier 的既有機制，不是在力的計算裡加例外 —— 物理沒有分支。
+      if (
+        !shape.wheelWeaponHitsGround &&
+        (WHEEL_WEAPON_NAMES as readonly string[]).includes(part.name)
+      ) {
+        desc.setCollisionGroups(VEHICLE_ONLY_GROUPS);
+      } else if (!shape.wheelWeaponHitsGround) {
+        desc.setCollisionGroups(VEHICLE_GROUPS);
+      }
+
+      return world.createCollider(desc, this.body);
+    });
 
     this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
     this.readState();

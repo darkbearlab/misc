@@ -124,7 +124,34 @@ export function buildFenceSegments(arena: ResolvedArena = DEFAULT_ARENA): FenceS
  * 剛體，這一步在物理上完全是 no-op，且每次執行都以完全相同的方式進行，
  * 不影響決定性。車輛必須在本函式回傳後才建立。
  */
-export function createWorld(arena: ResolvedArena = DEFAULT_ARENA): World {
+/**
+ * §第四輪的對照組所需的 collision group。
+ *
+ * Rapier 的配對條件是**雙向**的:
+ * `(A.membership & B.filter) != 0 && (B.membership & A.filter) != 0`。
+ * 因此光是把輪武器的 filter 收窄無效 —— 地板的 membership 是全 1,仍然通得過。
+ * 必須讓地板／圍欄擁有一個車體不共用的 membership 位元。
+ *
+ * **預設路徑完全不呼叫 `setCollisionGroups`。** 只有在需要關掉輪武器的地面碰撞時,
+ * 才把環境與車體一起打上標籤;不然就是預設的 0xFFFFFFFF,與 v1 位元相同。
+ */
+/** 環境（地板、圍欄）：membership = bit 2，filter = 全部。 */
+export const ENVIRONMENT_GROUPS = 0x0002_ffff;
+/** 車體一般部件：membership = bit 1，filter = 全部。 */
+export const VEHICLE_GROUPS = 0x0001_ffff;
+/** 只與車體碰撞、不與環境碰撞：membership = bit 1，filter = 只有 bit 1。 */
+export const VEHICLE_ONLY_GROUPS = 0x0001_0001;
+
+export function createWorld(
+  arena: ResolvedArena = DEFAULT_ARENA,
+  /**
+   * 為環境 collider 指定 collision group。
+   *
+   * **不指定時完全不呼叫 `setCollisionGroups`**，維持 Rapier 的預設 0xFFFFFFFF，
+   * 因此 v1 的執行路徑位元不變。只有「輪武器不參與地面碰撞」的對照組會傳入。
+   */
+  environmentGroups?: number,
+): World {
   const world = new RAPIER.World(GRAVITY);
   world.integrationParameters.dt = DT;
   world.integrationParameters.numSolverIterations = SOLVER_ITERATIONS;
@@ -134,12 +161,11 @@ export function createWorld(arena: ResolvedArena = DEFAULT_ARENA): World {
   const floorBody = world.createRigidBody(
     RAPIER.RigidBodyDesc.fixed().setTranslation(0, -floor.y, 0),
   );
-  world.createCollider(
-    RAPIER.ColliderDesc.cuboid(floor.x, floor.y, floor.z)
-      .setFriction(FLOOR_FRICTION)
-      .setRestitution(FLOOR_RESTITUTION),
-    floorBody,
-  );
+  const floorDesc = RAPIER.ColliderDesc.cuboid(floor.x, floor.y, floor.z)
+    .setFriction(FLOOR_FRICTION)
+    .setRestitution(FLOOR_RESTITUTION);
+  if (environmentGroups !== undefined) floorDesc.setCollisionGroups(environmentGroups);
+  world.createCollider(floorDesc, floorBody);
 
   // 圍欄：順序固定，不得更動
   for (const segment of buildFenceSegments(arena)) {
@@ -148,16 +174,15 @@ export function createWorld(arena: ResolvedArena = DEFAULT_ARENA): World {
         .setTranslation(segment.center.x, segment.center.y, segment.center.z)
         .setRotation(segment.rotation),
     );
-    world.createCollider(
-      RAPIER.ColliderDesc.cuboid(
-        segment.halfExtents.x,
-        segment.halfExtents.y,
-        segment.halfExtents.z,
-      )
-        .setFriction(FLOOR_FRICTION)
-        .setRestitution(FLOOR_RESTITUTION),
-      body,
-    );
+    const fenceDesc = RAPIER.ColliderDesc.cuboid(
+      segment.halfExtents.x,
+      segment.halfExtents.y,
+      segment.halfExtents.z,
+    )
+      .setFriction(FLOOR_FRICTION)
+      .setRestitution(FLOOR_RESTITUTION);
+    if (environmentGroups !== undefined) fenceDesc.setCollisionGroups(environmentGroups);
+    world.createCollider(fenceDesc, body);
   }
 
   world.step();

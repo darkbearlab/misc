@@ -206,13 +206,16 @@ async function main(): Promise<void> {
     row('全高 mm', (r) => fmt(r.override.totalHeight * 1000, 1));
     row('輪距 mm', (r) => fmt(r.shape.trackWidth * 1000, 1));
     row('軸距 mm', (r) => fmt(r.shape.wheelbase * 1000, 2));
-    row('底盤 half x/y/z mm', (r) =>
-      [
-        fmt(r.shape.chassisHalfExtents.x * 1000, 2),
-        fmt(r.shape.chassisHalfExtents.y * 1000, 2),
-        fmt(r.shape.chassisHalfExtents.z * 1000, 2),
-      ].join('/'),
-    );
+    row('底盤 half x/y/z mm', (r) => {
+      // 等比放大路徑的 parts[0] 恆為底盤 cuboid（見 resolveVehicle）。
+      const base = r.shape.parts[0];
+      if (base === undefined || base.kind !== 'cuboid') return '—';
+      return [
+        fmt(base.halfExtents.x * 1000, 2),
+        fmt(base.halfExtents.y * 1000, 2),
+        fmt(base.halfExtents.z * 1000, 2),
+      ].join('/');
+    });
     row('車體最低點 mm', (r) => fmt(r.shape.lowestY * 1000, 2));
     row('maxRadius mm', (r) => fmt(r.shape.maxRadius * 1000, 2));
     row('§7.1 投擲餘裕 mm', (r) => fmt((r.shape.maxRadius + 0.02) * 1000, 2));

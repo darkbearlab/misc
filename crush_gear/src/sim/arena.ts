@@ -140,19 +140,21 @@ export function resolveArena(override?: PhysicsOverride): ResolvedArena {
   const radius = override?.fieldRadius;
   const segment = override?.fieldSegmentLength;
   const vehicleOverride = override?.vehicle;
+  const preset = override?.vehiclePreset;
   const wantsMargin = override?.vehicleDerivedThrowMargin === true;
   const wantsSeparation = override?.enforceMinThrowSeparation === true;
   if (
     radius === undefined &&
     segment === undefined &&
     vehicleOverride === undefined &&
+    preset === undefined &&
     !wantsMargin &&
     !wantsSeparation
   ) {
     return DEFAULT_ARENA;
   }
 
-  const vehicle = resolveVehicle(vehicleOverride);
+  const vehicle = resolveVehicle(vehicleOverride, preset);
 
   const fieldRadius = radius ?? FIELD_RADIUS;
   const segmentLength = segment ?? FIELD_SEGMENT_LENGTH;

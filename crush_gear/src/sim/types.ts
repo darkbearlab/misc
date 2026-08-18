@@ -207,6 +207,9 @@ export type VehicleOverride = {
   trackWidth: number;
 };
 
+/** 第四輪:依官方部件上限重建的車體。preset 名稱。 */
+export type VehiclePresetName = 'official' | 'official-no-ground-wheel-weapon';
+
 export type PhysicsOverride = {
   /** 覆寫 `TIRE_FRICTION_COEF`。 */
   tireFrictionCoef?: number;
@@ -226,6 +229,13 @@ export type PhysicsOverride = {
    * §7.1 的投擲餘裕與 §7.2 的兩車最小距離也隨之改變。
    */
   vehicle?: VehicleOverride;
+  /**
+   * 改用預先定義的車體(第四輪的官方規格車)。
+   *
+   * 與 `vehicle` 互斥:`vehiclePreset` 優先。前者是第三輪的等比放大,
+   * 後者是依官方部件上限逐點寫死的六件式車體。
+   */
+  vehiclePreset?: VehiclePresetName;
   /**
    * 採用 §7.1 新版投擲餘裕(`VEHICLE_MAX_RADIUS + THROW_CLEARANCE`,與車長掛鉤)。
    *

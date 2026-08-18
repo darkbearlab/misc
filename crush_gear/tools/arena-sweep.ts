@@ -195,8 +195,8 @@ function measureSpawnOverlap(
       world.step();
       let contact = false;
       let deepest = 0;
-      for (const ca of [a.chassis, a.weapon]) {
-        for (const cb of [b.chassis, b.weapon]) {
+      for (const ca of a.colliders) {
+        for (const cb of b.colliders) {
           world.contactPair(ca, cb, (manifold) => {
             const n = manifold.numContacts();
             for (let k = 0; k < n; k += 1) {
