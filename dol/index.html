@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Degrees of Lewdity 0.5.11.9</title>
+<style>
+  :root {
+    --bg: #f4f4f5;
+    --card: #ffffff;
+    --text: #18181b;
+    --muted: #6b7280;
+    --border: #d4d4d8;
+    --accent: #7c3aed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171a;
+      --card: #232327;
+      --text: #ececee;
+      --muted: #9b9ba3;
+      --border: #35353b;
+      --accent: #a78bfa;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171a;
+    --card: #232327;
+    --text: #ececee;
+    --muted: #9b9ba3;
+    --border: #35353b;
+    --accent: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 3rem 1.25rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", sans-serif;
+  }
+  main { max-width: 34rem; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .35rem; }
+  .sub { color: var(--muted); margin: 0 0 2rem; font-size: .9rem; }
+  a.launch {
+    display: block;
+    padding: 1.1rem 1.25rem;
+    margin-bottom: .85rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  a.launch:hover { border-color: var(--accent); }
+  a.launch .name { font-weight: 600; }
+  a.launch .desc { display: block; color: var(--muted); font-size: .875rem; margin-top: .2rem; }
+  .note {
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+  .note code {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: .1rem .35rem;
+    font-size: .85em;
+  }
+  .note a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Degrees of Lewdity 0.5.11.9</h1>
+  <p class="sub">Text-only builds. Pick one to play.</p>
+
+  <a class="launch" href="Degrees%20of%20Lewdity%200.5.11.9%20text%20only%20%28cheat%29.html">
+    <span class="name">Play — retuned build</span>
+    <span class="desc">More money, less fatigue, faster skill growth. Saves stay compatible with vanilla.</span>
+  </a>
+
+  <a class="launch" href="Degrees%20of%20Lewdity%200.5.11.9%20text%20only.html">
+    <span class="name">Play — vanilla build</span>
+    <span class="desc">Untouched original, for comparison or a straight playthrough.</span>
+  </a>
+
+  <p class="note">
+    These links only work with the folder on your own machine — opening this page
+    from github.com will not launch anything, because GitHub serves the build as a
+    download rather than running it. Grab the folder first, then open this file.
+    <br><br>
+    What changed, and how to retune it from the browser console, is in
+    <a href="README.md">README.md</a>.
+  </p>
+</main>
+</body>
+</html>
