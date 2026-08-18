@@ -27,7 +27,21 @@
 - Node.js 20 以上,以 `tsx` 直接執行 TS
 - 測試框架:`vitest`
 
-**版本鎖定**:所有相依套件必須以精確版本號指定(不得使用 `^` 或 `~`)。`package-lock.json` 必須納入版本控制——未提交會使 CI 安裝到不同的 wasm binary,§16 的跨平台矩陣將失去意義。
+**版本鎖定**:
+
+**影響物理或渲染輸出的相依套件必須以精確版本號指定**(不得使用 `^` 或 `~`)。現行清單:
+
+| 套件 | 版本 | 理由 |
+|---|---|---|
+| `@dimforge/rapier3d-compat` | `0.19.3` | 決定物理結果;wasm binary 一變即失效 |
+| `three` | `0.185.1` | 決定渲染輸出 |
+| `@types/three` | `0.185.4` | 須與 three 對應 |
+| `vite` | `7.3.6` | vitest 3.2.4 的 vite 相依範圍為 ^5/^6/^7,vite 8 會衝突 |
+
+其餘為純開發工具(eslint、typescript、vitest、tsx 等),不進入任何輸出,允許使用 `^`;
+其實際版本由 `package-lock.json` 鎖定。
+
+**`package-lock.json` 必須納入版本控制**——CI 一律以 `npm ci` 安裝(依 lock file 精確還原整棵相依樹,含 transitive 相依)。未提交 lock file 會使 CI 安裝到不同的 wasm binary,§16 的跨平台矩陣將失去意義。
 
 Rapier 版本或 wasm binary 一旦變更,所有既有 replay 檔即失效,且 §16 須全部重跑。
 
