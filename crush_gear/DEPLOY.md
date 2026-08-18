@@ -42,7 +42,7 @@ Markdown 版本:
 連結用相對路徑 `./player/` 而非絕對網址 —— 入口頁與播放器在同一個站台下,
 相對路徑在 repo 改名或換 owner 時都不會壞。
 
-## 兩個踩過的坑
+## 三個踩過的坑
 
 **base path。** Vite 預設 `base` 是 `/`,直接部署會讓 `index.html` 去要
 `/assets/…`(站台根),而實際位置是 `/misc/player/assets/…`。結果是**畫面全白且
@@ -55,3 +55,9 @@ workflow 以 `--base=/${{ github.event.repository.name }}/player/` 指定,由 re
 一個描述該機制的 commit 訊息把自己的部署跳過了,而 Actions 頁面上不會有任何失敗記錄
 —— 只是沒有 run 出現,比失敗更難察覺。
 要在文件中提及時,寫成「CI 的略過標記」或拆開寫。
+
+** 與  不能並用。** GitHub 不允許同一個事件同時指定兩者,
+這樣寫整份 workflow 解析失敗。失敗的形式極不明顯:Actions 頁面上該 run 的名稱會變成
+**檔案路徑**而非  欄位,job 數為 0,看起來像「跑了但什麼都沒做」。
+本專案的迴圈防護因此改為只靠  ——  不在  之列,
+bot 的 commit 只動 ,自然不符合任何一條,不會觸發自己。
