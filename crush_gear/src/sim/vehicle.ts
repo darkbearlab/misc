@@ -49,6 +49,7 @@ import {
   scale,
   sub,
   WORLD_UP,
+  type PhysicsOverride,
   type Quat,
   type ThrowParams,
   type Vec3,
@@ -150,6 +151,14 @@ export class Vehicle {
   readonly weapon: Collider;
 
   private readonly ray: Ray;
+  /**
+   * 本車實際使用的輪胎參數。
+   *
+   * 未指定覆寫時就是 `constants.ts` 的同一個值 —— 是同一個 double，
+   * 因此預設路徑與寫死常數時位元完全相同。
+   */
+  private readonly tireFrictionCoef: number;
+  private readonly wheelSurfaceSpeed: number;
   private readonly state: FrameState = {
     tx: 0,
     ty: 0,
@@ -173,8 +182,11 @@ export class Vehicle {
   linearClampHits = 0;
   angularClampHits = 0;
 
-  constructor(world: World, params: ThrowParams) {
+  constructor(world: World, params: ThrowParams, physics?: PhysicsOverride) {
     assertVehicleGeometry();
+
+    this.tireFrictionCoef = physics?.tireFrictionCoef ?? TIRE_FRICTION_COEF;
+    this.wheelSurfaceSpeed = physics?.wheelSurfaceSpeed ?? WHEEL_SURFACE_SPEED;
 
     const rotation = orientationFromThrow(params.yaw, params.pitch);
     const forward = rotateByQuat(rotation, LOCAL_FORWARD);
@@ -357,8 +369,8 @@ export class Vehicle {
         normal,
         forward,
         normalForce,
-        wheelSurfaceSpeed: WHEEL_SURFACE_SPEED,
-        frictionCoef: TIRE_FRICTION_COEF,
+        wheelSurfaceSpeed: this.wheelSurfaceSpeed,
+        frictionCoef: this.tireFrictionCoef,
       });
       body.applyImpulseAtPoint(scale(force, dt), contact, true);
 

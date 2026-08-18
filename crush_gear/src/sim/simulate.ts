@@ -95,8 +95,8 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
 
   try {
     // §9.3 剛體建立順序固定：先車 A 後車 B。
-    const vehicleA = new Vehicle(world, input.throwA);
-    const vehicleB = new Vehicle(world, input.throwB);
+    const vehicleA = new Vehicle(world, input.throwA, options.physics);
+    const vehicleB = new Vehicle(world, input.throwB, options.physics);
     const vehicles = [vehicleA, vehicleB] as const;
 
     const judge = new Judge();

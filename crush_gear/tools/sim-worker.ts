@@ -12,9 +12,14 @@
 import { parentPort } from 'node:worker_threads';
 
 import { simulate } from '../src/sim/simulate.js';
-import type { BattleInput, SimResult } from '../src/sim/types.js';
+import type { BattleInput, PhysicsOverride, SimResult } from '../src/sim/types.js';
 
-export type WorkerTask = { index: number; battle: BattleInput };
+export type WorkerTask = {
+  index: number;
+  battle: BattleInput;
+  /** Phase 1.5 掃描用的物理覆寫；不指定時使用 constants.ts 的值。 */
+  physics?: PhysicsOverride;
+};
 
 export type WorkerReply =
   | { index: number; result: SimResult; error?: undefined }
@@ -26,7 +31,7 @@ if (port === null) {
 }
 
 port.on('message', (task: WorkerTask) => {
-  simulate(task.battle)
+  simulate(task.battle, task.physics === undefined ? {} : { physics: task.physics })
     .then((result) => {
       port.postMessage({ index: task.index, result } satisfies WorkerReply);
     })

@@ -178,7 +178,28 @@ export type SimStats = {
  * 診斷選項（§16 跨平台驗證專用）。
  * 全部不影響物理計算，只影響額外記錄多少資訊。
  */
+/**
+ * 探索用的物理覆寫（Phase 1.5 參數掃描）。
+ *
+ * **這不是正式的參數來源。** 選定的值最終必須寫死回 `src/data/constants.ts` 並升
+ * `PHYSICS_VERSION`；掃描結果不得作為版本依據。
+ *
+ * 覆寫以純參數傳入，`src/sim/` 不會因此讀取任何 I/O、環境變數或牆上時間（§3 禁令 1、2、6）。
+ * 不指定任何欄位時，傳給輪胎模型的就是 `constants.ts` 的同一個值，執行路徑與結果位元相同。
+ *
+ * 只開放 §6.5 明文允許調整的兩項：「若車輛行為顯得不順，正確做法是調 μ 與
+ * `wheelSurfaceSpeed`，不得加入轉向輔助、角速度阻尼或任何額外程式碼。」
+ */
+export type PhysicsOverride = {
+  /** 覆寫 `TIRE_FRICTION_COEF`。 */
+  tireFrictionCoef?: number;
+  /** 覆寫 `WHEEL_SURFACE_SPEED`。 */
+  wheelSurfaceSpeed?: number;
+};
+
 export type SimOptions = {
+  /** 探索用的物理覆寫；不指定時一律使用 `constants.ts` 的值。 */
+  physics?: PhysicsOverride;
   /**
    * 額外記錄「每一幀」的 checksum。
    * §9.2 規定的取樣頻率是每 60 幀一次，跨平台分歧只能定位到 60 幀的區間；

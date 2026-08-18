@@ -14,7 +14,7 @@
 import { Worker } from 'node:worker_threads';
 
 import { simulate } from '../src/sim/simulate.js';
-import type { BattleInput, SimResult } from '../src/sim/types.js';
+import type { BattleInput, PhysicsOverride, SimResult } from '../src/sim/types.js';
 import type { WorkerReply, WorkerTask } from './sim-worker.js';
 
 const WORKER_URL = new URL('./sim-worker.ts', import.meta.url);
@@ -33,12 +33,14 @@ function workerOptions(): { execArgv?: string[] } {
 export async function runBattles(
   battles: readonly BattleInput[],
   workerCount: number,
+  physics?: PhysicsOverride,
 ): Promise<SimResult[]> {
   if (battles.length === 0) return [];
+  const simOptions = physics === undefined ? {} : { physics };
 
   if (workerCount <= 1) {
     const results: SimResult[] = [];
-    for (const battle of battles) results.push(await simulate(battle));
+    for (const battle of battles) results.push(await simulate(battle, simOptions));
     return results;
   }
 
@@ -65,6 +67,7 @@ export async function runBattles(
               worker.postMessage({
                 index,
                 battle: battles[index] as BattleInput,
+                ...(physics === undefined ? {} : { physics }),
               } satisfies WorkerTask);
             };
 
