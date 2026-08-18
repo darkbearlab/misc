@@ -15,7 +15,11 @@ import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { FIELD_HALF_SEGMENT, FLIP_HOLD_FRAMES } from '../src/data/constants.js';
+import {
+  FIELD_HALF_SEGMENT,
+  FLIP_HOLD_FRAMES,
+  TIRE_FRICTION_COEF,
+} from '../src/data/constants.js';
 import { generateTrajectory, type Trajectory } from '../src/replay/trajectory.js';
 import { stadiumDistance } from '../src/sim/judge.js';
 import type { BattleInput } from '../src/sim/types.js';
@@ -268,7 +272,8 @@ describe('§2.3-5 疊圖的顯示值與診斷資料一致', () => {
   it('輪胎力大小恆等於 μN，因此箭頭長度與柱高成固定比例', () => {
     const diagnostics = trajectory.diagnostics!;
     const force = new THREE.Vector3();
-    const mu = 0.3;
+    // 由常數讀取而非寫死，否則 μ 一調就會變成假警報。
+    const mu = TIRE_FRICTION_COEF;
     let checked = 0;
     for (let frame = 200; frame < 400; frame += 1) {
       const grounded = diagnostics.wheelGrounded[0]!;

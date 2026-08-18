@@ -8,6 +8,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { TIMEOUT_FRAMES } from '../src/data/constants.js';
 import { checksumFrame, quantize } from '../src/sim/checksum.js';
 import { Rng } from '../src/sim/rng.js';
 import { simulate } from '../src/sim/simulate.js';
@@ -370,10 +371,10 @@ describe('§1.3 平行化不影響決定性', () => {
     const battles = [slow, ...Array.from({ length: 11 }, (_, i) => ({ ...fast, seed: 500 + i }))];
 
     const parallel = await runBattles(battles, 8);
-    expect(parallel[0]?.frames).toBe(7200);
+    expect(parallel[0]?.frames).toBe(TIMEOUT_FRAMES);
     expect(parallel[0]?.reason).toBe('TIMEOUT');
     for (let i = 1; i < battles.length; i += 1) {
-      expect(parallel[i]?.frames).toBeLessThan(7200);
+      expect(parallel[i]?.frames).toBeLessThan(TIMEOUT_FRAMES);
     }
   }, 300_000);
 });

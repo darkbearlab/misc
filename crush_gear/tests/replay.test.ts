@@ -13,7 +13,12 @@ import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { FIELD_RADIUS, FLIP_HOLD_FRAMES, OUT_THRESHOLD } from '../src/data/constants.js';
+import {
+  FIELD_RADIUS,
+  FLIP_HOLD_FRAMES,
+  OUT_THRESHOLD,
+  TIMEOUT_FRAMES,
+} from '../src/data/constants.js';
 import {
   PHYSICS_VERSION,
   RAPIER_VERSION,
@@ -151,7 +156,7 @@ describe('§P1.3 軌跡資料', () => {
     const t = await generateTrajectory(TIMEOUT_BATTLE, {
       generatedAt: '2026-01-01T00:00:00.000Z',
     });
-    expect(t.frameCount).toBe(7201);
+    expect(t.frameCount).toBe(TIMEOUT_FRAMES + 1);
     const bytes =
       t.position.reduce((s, a) => s + a.byteLength, 0) +
       t.rotation.reduce((s, a) => s + a.byteLength, 0);

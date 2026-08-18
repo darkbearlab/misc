@@ -26,7 +26,7 @@ import { simulate } from '../src/sim/simulate.js';
 import type { BattleInput, SimResult, ThrowParams } from '../src/sim/types.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const FIXTURE_DIR = join(REPO_ROOT, 'fixtures', 'platform');
+const DEFAULT_FIXTURE_DIR = join(REPO_ROOT, 'fixtures', 'platform');
 
 const USAGE = `crush-gear cross-platform determinism verifier (SPEC v1.2 §16)
 
@@ -35,6 +35,11 @@ Usage:
   tsx tools/verify-platform.ts --compare <baseline.json>
   tsx tools/verify-platform.ts --dump <fixtureId> --frame <n>
   tsx tools/verify-platform.ts --list
+
+Options:
+  --fixtures <dir>  Fixture directory (default: fixtures/platform).
+                    Point it at an archived set after a physicsVersion bump, e.g.
+                    --fixtures fixtures/platform/v1 --compare fixtures/platform/v1/baseline.json
 
 Exit code is 1 when any fixture diverges.
 `;
@@ -214,14 +219,21 @@ function parseThrow(value: unknown, what: string): ThrowParams {
  */
 const REFERENCE_BASELINE_NAME = 'baseline.json';
 
-/** 依檔名排序讀取，確保任何平台上的順序都相同。 */
-function loadFixtures(): Fixture[] {
-  const files = readdirSync(FIXTURE_DIR)
+/**
+ * 依檔名排序讀取，確保任何平台上的順序都相同。
+ *
+ * 子目錄會被 `.json` 過濾掉，因此把舊版歸檔到 `fixtures/platform/v1/` 不會干擾現行組；
+ * 要重跑歸檔版時以 `--fixtures fixtures/platform/v1` 指向該目錄即可。
+ */
+function loadFixtures(dir: string): Fixture[] {
+  const files = readdirSync(dir)
     .filter((f) => f.endsWith('.json') && f !== REFERENCE_BASELINE_NAME)
     .sort();
   return files.map((file) => {
-    const raw = JSON.parse(readFileSync(join(FIXTURE_DIR, file), 'utf8').replace(/^\uFEFF/, '')) as
-      Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(join(dir, file), 'utf8').replace(/^\uFEFF/, '')) as Record<
+      string,
+      unknown
+    >;
     const id = typeof raw['id'] === 'string' ? raw['id'] : file.replace(/\.json$/, '');
     const seed = raw['seed'];
     if (typeof seed !== 'number' || !Number.isInteger(seed)) {
@@ -395,7 +407,10 @@ async function main(): Promise<number> {
     return argv.length === 0 ? 1 : 0;
   }
 
-  const fixtures = loadFixtures();
+  // 歸檔版的 fixture 以 --fixtures 指向，例如 PHYSICS_VERSION 升版後重跑 v1：
+  //   --fixtures fixtures/platform/v1 --compare fixtures/platform/v1/baseline.json
+  const fixtureDir = valueOf('--fixtures') ?? DEFAULT_FIXTURE_DIR;
+  const fixtures = loadFixtures(fixtureDir);
 
   if (has('--list')) {
     for (const f of fixtures) {
