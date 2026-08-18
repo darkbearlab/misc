@@ -15,11 +15,16 @@
 import { THROW_LIMITS, TIRE_FRICTION_COEF } from '../src/data/constants.js';
 import { minThrowSeparation, resolveArena, stadiumDistanceIn } from '../src/sim/arena.js';
 import { Rng } from '../src/sim/rng.js';
-import type { PhysicsOverride, ThrowParams, VehicleOverride } from '../src/sim/types.js';
+import type {
+  BattleInput,
+  PhysicsOverride,
+  ThrowParams,
+  VehicleOverride,
+} from '../src/sim/types.js';
 import { assertVehicleGeometry } from '../src/sim/vehicle.js';
 import { resolveVehicle, V1_TOTAL_HEIGHT } from '../src/sim/vehicle-shape.js';
 import { initPhysics } from '../src/sim/world.js';
-import { measureSingleVehicle, SWEEP_SEED } from './measure.js';
+import { measureSingleVehicle, measureSweep, SWEEP_SEED } from './measure.js';
 
 type ArenaSpec = { name: string; radius: number; segment: number };
 
@@ -60,6 +65,8 @@ const HEIGHTS: Record<string, readonly [number, number, number]> = {
 // ──────────────────────────────────────────────────────────────────────────
 
 type SamplingCheck = {
+  /** 實際取到的合法對戰，供 --battles 模式使用。 */
+  battles: BattleInput[];
   /** 只計 §7.2：兩點都已合法後，因距離不足而整組重抽的比例。 */
   separationRate: number;
   /** 含 §7.1 點位越界與 §7.2 距離不足的總拒絕率。 */
@@ -96,24 +103,25 @@ function checkSampling(physics: PhysicsOverride): SamplingCheck {
     }
   };
 
-  const rest = (): void => {
+  const withRest = (x: number, z: number): ThrowParams => {
     const L = THROW_LIMITS;
-    const unused: Omit<ThrowParams, 'x' | 'z'> = {
+    return {
+      x,
+      z,
       y: rng.nextRange(L.y.min, L.y.max),
       yaw: rng.nextRange(L.yaw.min, L.yaw.max),
       pitch: rng.nextRange(L.pitch.min, L.pitch.max),
       speed: rng.nextRange(L.speed.min, L.speed.max),
       spin: rng.nextRange(L.spin.min, L.spin.max),
     };
-    void unused;
   };
 
   const required = arena.minThrowSeparation;
-  let pairs = 0;
+  const battles: BattleInput[] = [];
   let pairAttempts = 0;
   // 上限保護：拒絕率趨近 1 時不能無限迴圈。
   const LIMIT = SAMPLE_PAIRS * 2000;
-  while (pairs < SAMPLE_PAIRS && pairAttempts < LIMIT) {
+  while (battles.length < SAMPLE_PAIRS && pairAttempts < LIMIT) {
     pairAttempts += 1;
     const a = randomPoint();
     const b = randomPoint();
@@ -123,15 +131,18 @@ function checkSampling(physics: PhysicsOverride): SamplingCheck {
       separationRejects += 1;
       continue;
     }
-    rest();
-    rest();
-    pairs += 1;
+    battles.push({
+      seed: 1000 + battles.length,
+      throwA: withRest(a.x, a.z),
+      throwB: withRest(b.x, b.z),
+    });
   }
 
   return {
+    battles,
     separationRate: separationRejects / pairAttempts,
     rejectRate: (pointRejects + separationRejects) / (pointAttempts + separationRejects),
-    pairs,
+    pairs: battles.length,
   };
 }
 
@@ -146,6 +157,10 @@ async function main(): Promise<void> {
 
   const arg = process.argv.find((a) => a.startsWith('--height-reading='));
   const readings = arg === undefined ? ['absolute', 'ratio'] : [arg.split('=')[1] as string];
+  const wantBattles = process.argv.includes('--battles');
+  /** 已跑過的車體（絕對尺寸相同者不重跑），key 為四項尺寸。 */
+  const battleDone = new Set<string>();
+  const battleRows: string[] = [];
 
   const out: string[] = [];
   out.push('# 第三輪靜態分析：車體 × 場地 9 組');
@@ -264,6 +279,35 @@ async function main(): Promise<void> {
         const shortSide = arena.fieldRadius * 2;
         const s = checkSampling(physics);
         const usable = s.separationRate <= 0.5 && s.pairs === SAMPLE_PAIRS;
+        if (wantBattles && usable) {
+          const key = [
+            v.override.totalLength,
+            v.override.chassisWidth,
+            v.override.totalHeight,
+            v.override.trackWidth,
+            a.radius,
+          ].join(':');
+          if (!battleDone.has(key)) {
+            battleDone.add(key);
+            process.stderr.write(`  battles: ${v.spec.name} x ${a.name} (${reading}) ...
+`);
+            const sweep = await measureSweep(s.battles, physics);
+            const watchable = sweep.histogram
+              .filter((b) => b.label !== '0-120' && b.label !== '7200 (timeout)')
+              .reduce((acc, b) => acc + b.count, 0);
+            const pctOf = (n: number): string => fmt((100 * n) / sweep.battles, 1);
+            battleRows.push(
+              `| ${v.spec.name} x ${a.name}（全高 ${fmt(v.override.totalHeight * 1000, 1)} mm） | ` +
+                `${fmt(shortSide / v.override.totalLength, 2)} | ` +
+                `${pctOf(sweep.reasons.OUT)}% | ${pctOf(sweep.reasons.FLIP)}% | ` +
+                `**${pctOf(sweep.reasons.TIMEOUT)}%** | ` +
+                `${pctOf(sweep.histogram[0]?.count ?? 0)}% | **${pctOf(watchable)}%** | ` +
+                `${fmt(sweep.angularSpeed.p50, 1)} / ${fmt(sweep.angularSpeed.max, 1)} | ` +
+                `${sweep.clampHits.linear} / ${sweep.clampHits.angular} | ` +
+                `${fmt(sweep.maxComY, 4)} |`,
+            );
+          }
+        }
         grid.push(
           `| ${v.spec.name} × ${a.name} | ${fmt(a.radius, 3)} | ${fmt(shortSide * 1000, 0)} | ` +
             `${fmt(shortSide / v.override.totalLength, 2)} | ` +
@@ -274,6 +318,23 @@ async function main(): Promise<void> {
       }
     }
     out.push(grid.join('\n'));
+  }
+
+  if (wantBattles) {
+    out.push('');
+    out.push('## 通過 §7.2 的組合：500 場實測');
+    out.push('');
+    out.push(
+      '只跑 §7.2 拒絕率 ≤ 50% 的組合 —— 其餘依規格已判定不可用，跑了也不構成有效樣本。' +
+        '同一組絕對尺寸只跑一次（V1 與兩種全高讀法相同）。',
+    );
+    out.push('');
+    out.push(
+      '| 組合 | 短邊/車長 | OUT | FLIP | TIMEOUT | 0-120 幀 | 120-7199 幀 | ' +
+        '角速度 p50/max | clamp 線/角 | 質心 y 峰值 |',
+    );
+    out.push('|---|---|---|---|---|---|---|---|---|---|');
+    out.push(...battleRows);
   }
 
   process.stdout.write(`${out.join('\n')}\n`);
