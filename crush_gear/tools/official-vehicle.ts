@@ -232,8 +232,8 @@ async function main(): Promise<void> {
 
   // ── 兩組戰鬥 ──
   const groups: { name: string; preset: VehiclePresetName }[] = [
-    { name: '輪武器參與地面碰撞', preset: 'official' },
-    { name: '對照組:不參與', preset: 'official-no-ground-wheel-weapon' },
+    { name: '輪武器參與地面碰撞', preset: 'official-ground-wheel-weapon' },
+    { name: '不參與（裁決 1 採用）', preset: 'official' },
   ];
   const rows: string[] = [];
   rows.push('| 指標 | ' + groups.map((g) => g.name).join(' | ') + ' |');

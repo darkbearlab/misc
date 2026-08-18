@@ -57,6 +57,13 @@ export type ResolvedVehicle = {
    * 這是第四輪要求的對照組,用來判斷它的穩定效果是否真實存在。
    */
   wheelWeaponHitsGround: boolean;
+  /**
+   * 非輪子部件對地板的摩擦係數（§5.5 例外，§第五輪）。
+   *
+   * `undefined` 時地板維持 FLOOR_FRICTION = 0，即 v1 的行為。
+   * 鏟刃離地 1.5 mm，觸地頻率遠高於輪武器；沒有這一項就會重演第四輪的無摩擦滑板。
+   */
+  nonWheelFriction?: number;
 };
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -341,17 +348,124 @@ function buildOfficial(wheelWeaponHitsGround: boolean): ResolvedVehicle {
   };
 }
 
-export const OFFICIAL_VEHICLE: ResolvedVehicle = buildOfficial(true);
+/**
+ * 官方規格車。**輪武器不參與地面碰撞（裁決 1）** —— 第四輪實測顯示，
+ * 在 FLOOR_FRICTION = 0 的架構下它會變成無摩擦滑板，那是模型產物而非防傾效果。
+ */
+export const OFFICIAL_VEHICLE: ResolvedVehicle = buildOfficial(false);
 /** 對照組：輪武器不參與地面碰撞，其餘完全相同。 */
-export const OFFICIAL_VEHICLE_NO_GROUND: ResolvedVehicle = buildOfficial(false);
+/** 第四輪的對照組（輪武器參與地面碰撞），保留供回溯比對。 */
+export const OFFICIAL_VEHICLE_GROUND: ResolvedVehicle = buildOfficial(true);
 
 // ──────────────────────────────────────────────────────────────────────────
 // 解析
 // ──────────────────────────────────────────────────────────────────────────
 
+
+// ──────────────────────────────────────────────────────────────────────────
+// 第五輪：鏟形前後武器
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * 鏟形前武器（第五輪，取代第四輪的箱形前武器）。
+ *
+ * 座標由裁決直接給定（以離地高表示，此處換算為局部 y）：
+ *
+ * ```
+ * 刃口下緣 (±27.5, 1.5, 98)    刃口上緣 (±27.5, 3.0, 98)
+ * 根部下緣 (±27.5, 12.0, 33)   根部上緣 (±27.5, 36.0, 33)
+ * ```
+ *
+ * 等寬楔形（全長 55 mm 寬，不收窄）。斜面仰角
+ * `atan((12.0 − 1.5) / 65) = 9.17°`，設計意圖是單次正面接觸即可完成掀起。
+ *
+ * **刃口厚 1.5 mm，刻意不收成尖點** —— 理由同 `SPEC.md` §6.1 對 v1 刃口寬度的說明：
+ * 退化成尖點的 convex hull 會讓碰撞法線計算不穩定。
+ *
+ * 刃口離地 1.5 mm 滿足官方「前後武器離地 > 1 mm」，留 0.5 mm 餘裕；
+ * 這也正式啟用了官方規則的 1–10 mm 特許區間（其餘零件不得進入）。
+ */
+const FRONT_WEDGE: VehiclePart = {
+  kind: 'hull',
+  name: 'front-weapon',
+  points: [
+    [-mm(27.5), fromGround(1.5), mm(98)],
+    [mm(27.5), fromGround(1.5), mm(98)],
+    [-mm(27.5), fromGround(3.0), mm(98)],
+    [mm(27.5), fromGround(3.0), mm(98)],
+    [-mm(27.5), fromGround(12.0), mm(33)],
+    [mm(27.5), fromGround(12.0), mm(33)],
+    [-mm(27.5), fromGround(36.0), mm(33)],
+    [mm(27.5), fromGround(36.0), mm(33)],
+  ],
+  mass: 0.022,
+};
+
+/**
+ * 鏟形後武器（刮刀）。
+ *
+ * 依前武器的同一原則推導，但官方高度上限只有 25 mm，因此無法做成鏟：
+ *
+ * ```
+ * 刃口下緣 (±25, 1.5, −98)   刃口上緣 (±25, 3.0, −98)
+ * 根部下緣 (±25, 7.2, −33)   根部上緣 (±25, 26.5, −33)
+ * ```
+ *
+ * 仰角 `atan((7.2 − 1.5) / 65) = 5.01°`，比前武器平緩得多 —— 25 mm 的高度上限
+ * 放不下 9° 的斜面（65 mm 行程需要 10.5 mm 抬升，加上刃厚後總高會超限）。
+ * 垂直範圍 26.5 − 1.5 = 25.0 mm，**剛好頂到上限**。
+ *
+ * 形態因此是**刮刀而非鏟**：它能把對手撬離地面一點，但沒有足夠的斜面把對手送上去。
+ */
+const REAR_SCRAPER: VehiclePart = {
+  kind: 'hull',
+  name: 'rear-weapon',
+  points: [
+    [-mm(25), fromGround(1.5), -mm(98)],
+    [mm(25), fromGround(1.5), -mm(98)],
+    [-mm(25), fromGround(3.0), -mm(98)],
+    [mm(25), fromGround(3.0), -mm(98)],
+    [-mm(25), fromGround(7.2), -mm(33)],
+    [mm(25), fromGround(7.2), -mm(33)],
+    [-mm(25), fromGround(26.5), -mm(33)],
+    [mm(25), fromGround(26.5), -mm(33)],
+  ],
+  mass: 0.01,
+};
+
+/** §5.5 例外：非輪子部件對地板的摩擦係數（第五輪初始值，待實測確認）。 */
+export const NON_WHEEL_FRICTION = 0.2;
+
+/** 第五輪車體：第四輪的底盤／外殼／輪武器，前後武器換成鏟形。 */
+const WEDGE_PARTS: readonly VehiclePart[] = OFFICIAL_PARTS_BASE.map((part) =>
+  part.name === 'front-weapon' ? FRONT_WEDGE : part.name === 'rear-weapon' ? REAR_SCRAPER : part,
+);
+
+function buildWedge(nonWheelFriction?: number): ResolvedVehicle {
+  return {
+    ...buildOfficial(false),
+    parts: WEDGE_PARTS,
+    totalMass: WEDGE_PARTS.reduce((sum, p) => sum + p.mass, 0),
+    lowestY: computeLowestY(WEDGE_PARTS),
+    maxRadius: computeMaxRadius(WEDGE_PARTS),
+    totalLength: extent(WEDGE_PARTS, 2),
+    totalWidth: extent(WEDGE_PARTS, 0),
+    totalHeight: extent(WEDGE_PARTS, 1),
+    // exactOptionalPropertyTypes：不設摩擦時整個欄位省略，而不是給 undefined。
+    ...(nonWheelFriction === undefined ? {} : { nonWheelFriction }),
+  };
+}
+
+/** 第五輪的正式車體：鏟形武器 + 非輪子地面摩擦 + 輪武器不觸地（裁決 1）。 */
+export const WEDGE_VEHICLE: ResolvedVehicle = buildWedge(NON_WHEEL_FRICTION);
+/** 對照組：同一台車，但地板摩擦仍為 0，用來確認 §5.5 例外是否必要。 */
+export const WEDGE_VEHICLE_NO_FRICTION: ResolvedVehicle = buildWedge();
+
 const PRESETS: Record<VehiclePresetName, ResolvedVehicle> = {
   official: OFFICIAL_VEHICLE,
-  'official-no-ground-wheel-weapon': OFFICIAL_VEHICLE_NO_GROUND,
+  'official-ground-wheel-weapon': OFFICIAL_VEHICLE_GROUND,
+  wedge: WEDGE_VEHICLE,
+  'wedge-no-friction': WEDGE_VEHICLE_NO_FRICTION,
 };
 
 /**

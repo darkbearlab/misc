@@ -151,9 +151,22 @@ export function createWorld(
    * 因此 v1 的執行路徑位元不變。只有「輪武器不參與地面碰撞」的對照組會傳入。
    */
   environmentGroups?: number,
+  /**
+   * 非輪子部件對**地板**的摩擦係數（§5.5 例外，§第五輪新增）。
+   *
+   * 不指定時維持 FLOOR_FRICTION = 0，即 v1 的行為。
+   *
+   * 只設在地板上、且以 Max 合成 —— 這樣它只影響「車體 collider 對地板」：
+   *   - 輪胎完全不受影響：輪子是 raycast，根本沒有 collider（§6.4）
+   *   - 車對車仍為 0：兩邊都是車體 collider，max(0, 0) = 0
+   * 若改設在車體 collider 上，車對車也會跟著有摩擦，那超出本例外的範圍。
+   */
+  nonWheelFriction?: number,
+  /** 單一物理步的時間（§第五輪 substep）。不指定時為 DT。 */
+  physicsDt?: number,
 ): World {
   const world = new RAPIER.World(GRAVITY);
-  world.integrationParameters.dt = DT;
+  world.integrationParameters.dt = physicsDt ?? DT;
   world.integrationParameters.numSolverIterations = SOLVER_ITERATIONS;
 
   // 地板：單一矩形 cuboid，上表面對齊 y = 0
@@ -162,8 +175,11 @@ export function createWorld(
     RAPIER.RigidBodyDesc.fixed().setTranslation(0, -floor.y, 0),
   );
   const floorDesc = RAPIER.ColliderDesc.cuboid(floor.x, floor.y, floor.z)
-    .setFriction(FLOOR_FRICTION)
+    .setFriction(nonWheelFriction ?? FLOOR_FRICTION)
     .setRestitution(FLOOR_RESTITUTION);
+  if (nonWheelFriction !== undefined) {
+    floorDesc.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Max);
+  }
   if (environmentGroups !== undefined) floorDesc.setCollisionGroups(environmentGroups);
   world.createCollider(floorDesc, floorBody);
 

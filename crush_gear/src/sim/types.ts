@@ -208,7 +208,11 @@ export type VehicleOverride = {
 };
 
 /** 第四輪:依官方部件上限重建的車體。preset 名稱。 */
-export type VehiclePresetName = 'official' | 'official-no-ground-wheel-weapon';
+export type VehiclePresetName =
+  | 'official'
+  | 'official-ground-wheel-weapon'
+  | 'wedge'
+  | 'wedge-no-friction';
 
 export type PhysicsOverride = {
   /** 覆寫 `TIRE_FRICTION_COEF`。 */
@@ -236,6 +240,17 @@ export type PhysicsOverride = {
    * 後者是依官方部件上限逐點寫死的六件式車體。
    */
   vehiclePreset?: VehiclePresetName;
+  /**
+   * 物理子步數（§第五輪）。每個模擬幀內以 dt/substeps 連續步進 N 次。
+   *
+   * **幀的語意完全不變**：checksum 取樣頻率、TIMEOUT_FRAMES、軌跡長度、判定時機
+   * 全部仍以「幀」為單位，只是每一幀內部積分得更細。
+   * 未指定時為 1，執行路徑與 v1 位元相同。
+   *
+   * 存在的理由：鏟刃離地 1.5 mm、厚 1.5 mm，dt = 1/120 下車速 3 m/s 的單步位移
+   * 達 25 mm，刃口會直接穿過對手底盤而不是插進去。
+   */
+  substeps?: number;
   /**
    * 採用 §7.1 新版投擲餘裕(`VEHICLE_MAX_RADIUS + THROW_CLEARANCE`,與車長掛鉤)。
    *

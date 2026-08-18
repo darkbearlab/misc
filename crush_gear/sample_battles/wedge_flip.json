@@ -1,0 +1,33 @@
+{
+  "_comment": "第五輪：A 自後方以鏟形前武器接觸 B 的車尾下緣，將 B 掀翻。physics 需以 vehiclePreset: \"wedge\" + substeps: 4 載入。",
+  "physics": {
+    "vehiclePreset": "wedge",
+    "substeps": 4,
+    "vehicleDerivedThrowMargin": true,
+    "enforceMinThrowSeparation": true
+  },
+  "seed": 20260818,
+  "throwA": {
+    "x": 0.02,
+    "z": -0.16,
+    "y": 0.031,
+    "yaw": 0,
+    "pitch": 0,
+    "speed": 4.5,
+    "spin": 0
+  },
+  "throwB": {
+    "x": 0,
+    "z": 0.06,
+    "y": 0.031,
+    "yaw": 0,
+    "pitch": 0,
+    "speed": 0,
+    "spin": 0
+  },
+  "expected": {
+    "result": "A_WINS",
+    "reason": "FLIP",
+    "frames": 302
+  }
+}

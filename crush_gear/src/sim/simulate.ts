@@ -145,9 +145,18 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
   // 輪武器不參與地面碰撞的對照組，需要環境擁有獨立的 membership 位元才擋得掉；
   // 其餘情況一律不呼叫 setCollisionGroups，維持 v1 的執行路徑（見 world.ts）。
   const shape = resolveVehicle(options.physics?.vehicle, options.physics?.vehiclePreset);
+  const substeps = options.physics?.substeps ?? 1;
+  if (!Number.isInteger(substeps) || substeps < 1) {
+    throw new RangeError(
+      `PhysicsOverride.substeps must be a positive integer, got ${String(substeps)}.`,
+    );
+  }
+  const physicsDt = substeps === 1 ? DT : DT / substeps;
   const world = createWorld(
     arena,
     shape.wheelWeaponHitsGround ? undefined : ENVIRONMENT_GROUPS,
+    shape.nonWheelFriction,
+    physicsDt,
   );
 
   try {
@@ -278,15 +287,27 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
         (diagWriters[0] as WheelDiagnosticsWriter).frame = frame + 1;
         (diagWriters[1] as WheelDiagnosticsWriter).frame = frame + 1;
       }
-      vehicleA.applyWheelForces(world, DT, diagWriters?.[0]);
-      vehicleB.applyWheelForces(world, DT, diagWriters?.[1]);
+      // ── 一個模擬幀 = substeps 次物理步（§第五輪）──────────────────────
+      //
+      // 幀的語意完全不變：checksum 取樣、判定、軌跡、TIMEOUT_FRAMES 全部仍以幀為單位。
+      // 改變的只有幀內部積分多細。substeps = 1 時整段退化為原本的三行，位元不變。
+      //
+      // 每個子步都要重新算輪力：懸吊是 raycast，車體移動後接觸點就變了，
+      // 沿用上一子步的力等於用過期的幾何積分，那正是 substep 要避免的事。
+      for (let sub = 0; sub < substeps; sub += 1) {
+        // 診斷只在最後一個子步寫入，代表該幀結束時的狀態；
+        // 每個子步都寫會讓同一幀的資料被覆蓋 substeps 次，徒增成本。
+        const writeDiag = sub === substeps - 1 ? diagWriters : null;
+        vehicleA.applyWheelForces(world, physicsDt, writeDiag?.[0]);
+        vehicleB.applyWheelForces(world, physicsDt, writeDiag?.[1]);
 
-      world.step();
+        world.step();
+
+        // 每個子步只跨 JS↔wasm 邊界讀一次狀態。
+        vehicleA.readState();
+        vehicleB.readState();
+      }
       frame += 1;
-
-      // 每幀只跨 JS↔wasm 邊界讀一次狀態，之後的取樣、clamp、判定、checksum 全部共用。
-      vehicleA.readState();
-      vehicleB.readState();
 
       // clamp 前先取樣，才能看見真實的速度峰值。
       sampleStats();
