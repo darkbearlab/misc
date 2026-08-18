@@ -20,13 +20,9 @@ import {
   THROW_LIMITS,
   THROW_MAX_STADIUM_DISTANCE,
   TIRE_FRICTION_COEF,
-  TOTAL_MASS,
-  TRACK_WIDTH,
-  WHEELBASE,
-  WHEEL_ANCHORS,
   WHEEL_SURFACE_SPEED,
 } from '../src/data/constants.js';
-import { stadiumDistance } from '../src/sim/judge.js';
+import { resolveArena, stadiumDistanceIn } from '../src/sim/arena.js';
 import { Rng } from '../src/sim/rng.js';
 import type {
   BattleInput,
@@ -36,6 +32,7 @@ import type {
   ThrowParams,
 } from '../src/sim/types.js';
 import { Vehicle } from '../src/sim/vehicle.js';
+import { resolveVehicle } from '../src/sim/vehicle-shape.js';
 import { createWorld } from '../src/sim/world.js';
 import { runBattles } from './pool.js';
 
@@ -51,7 +48,7 @@ function randomThrow(rng: Rng): ThrowParams {
   do {
     x = rng.nextRange(-THROW_MAX_STADIUM_DISTANCE, THROW_MAX_STADIUM_DISTANCE);
     z = rng.nextRange(-maxZ, maxZ);
-  } while (stadiumDistance(x, z) > THROW_MAX_STADIUM_DISTANCE);
+  } while (stadiumDistanceIn(FIELD_HALF_SEGMENT, x, z) > THROW_MAX_STADIUM_DISTANCE);
 
   const L = THROW_LIMITS;
   return {
@@ -90,6 +87,7 @@ export type SingleVehicleMeasurement = {
   freeAccel: number;
   freeAccelTheory: number;
   freeAccelRatio: number;
+  modeK: { heave: number; pitch: number; roll: number };
   modes: { heave: number; pitch: number; roll: number };
 };
 
@@ -97,9 +95,10 @@ export type SingleVehicleMeasurement = {
 export function measureSingleVehicle(physics?: PhysicsOverride): SingleVehicleMeasurement {
   const g = Math.abs(GRAVITY.y);
   const mu = physics?.tireFrictionCoef ?? TIRE_FRICTION_COEF;
-  const anchorY = WHEEL_ANCHORS[0]?.[1] as number;
+  const shape = resolveVehicle(physics?.vehicle);
+  const anchorY = shape.wheelAnchors[0]?.[1] as number;
 
-  const settleWorld = createWorld();
+  const settleWorld = createWorld(resolveArena(physics));
   const settle = new Vehicle(
     settleWorld,
     { x: 0, z: 0, y: 0.06, yaw: 0, pitch: 0, speed: 0, spin: 0 },
@@ -118,7 +117,7 @@ export function measureSingleVehicle(physics?: PhysicsOverride): SingleVehicleMe
   const inertia = { x: inertiaRaw.x, y: inertiaRaw.y, z: inertiaRaw.z };
   settleWorld.free();
 
-  const staticCompression = (TOTAL_MASS * g) / (4 * SUSPENSION_STIFFNESS);
+  const staticCompression = (shape.totalMass * g) / (4 * SUSPENSION_STIFFNESS);
   const contactY = anchorY - (SUSPENSION_REST_LENGTH - staticCompression);
   const cogHeight = localCom.y - contactY;
 
@@ -141,19 +140,25 @@ export function measureSingleVehicle(physics?: PhysicsOverride): SingleVehicleMe
 
   return {
     rideHeight,
-    groundClearance: rideHeight - 0.01,
+    groundClearance: rideHeight + shape.lowestY,
     cogHeight,
     // 翻覆臨界只取決於幾何,不隨 μ 改變 —— 作為掃描的對照
-    rolloverMu: TRACK_WIDTH / (2 * cogHeight),
+    rolloverMu: shape.trackWidth / (2 * cogHeight),
     localCom,
     inertia,
     freeAccel,
     freeAccelTheory,
     freeAccelRatio: freeAccel / freeAccelTheory,
+    // 每個模態的每幀速度衰減比 r = 1 − c·K，K = n·lever²·dt / I_eff（§6.4）。
+    modeK: {
+      heave: 4 * DT / shape.totalMass,
+      pitch: (4 * (shape.wheelbase / 2) ** 2 * DT) / inertia.x,
+      roll: (4 * (shape.trackWidth / 2) ** 2 * DT) / inertia.z,
+    },
     modes: {
-      heave: 1 - SUSPENSION_DAMPING * ((4 * DT) / TOTAL_MASS),
-      pitch: 1 - SUSPENSION_DAMPING * ((4 * (WHEELBASE / 2) ** 2 * DT) / inertia.x),
-      roll: 1 - SUSPENSION_DAMPING * ((4 * (TRACK_WIDTH / 2) ** 2 * DT) / inertia.z),
+      heave: 1 - SUSPENSION_DAMPING * ((4 * DT) / shape.totalMass),
+      pitch: 1 - SUSPENSION_DAMPING * ((4 * (shape.wheelbase / 2) ** 2 * DT) / inertia.x),
+      roll: 1 - SUSPENSION_DAMPING * ((4 * (shape.trackWidth / 2) ** 2 * DT) / inertia.z),
     },
   };
 }

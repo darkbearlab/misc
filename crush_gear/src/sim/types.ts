@@ -190,6 +190,23 @@ export type SimStats = {
  * 只開放 §6.5 明文允許調整的兩項：「若車輛行為顯得不順，正確做法是調 μ 與
  * `wheelSurfaceSpeed`，不得加入轉向輔助、角速度阻尼或任何額外程式碼。」
  */
+/**
+ * 探索用的車體尺寸覆寫(Phase 1.5 第三輪)。
+ *
+ * 四個自由度,其餘幾何由 `resolveVehicle()` 推導。**質量不在此列** ——
+ * 依裁決固定為 0.15 kg(0.11 / 0.04),不隨尺寸變化。
+ */
+export type VehicleOverride = {
+  /** 全長(底盤後緣至刃口),m。V1 = 0.150。 */
+  totalLength: number;
+  /** 底盤寬,m。V1 = 0.070。 */
+  chassisWidth: number;
+  /** 全高(車體自身的垂直範圍,非離地高),m。V1 = 0.025。 */
+  totalHeight: number;
+  /** 輪距,m。V1 = 0.056。軸距隨此等比。 */
+  trackWidth: number;
+};
+
 export type PhysicsOverride = {
   /** 覆寫 `TIRE_FRICTION_COEF`。 */
   tireFrictionCoef?: number;
@@ -198,12 +215,33 @@ export type PhysicsOverride = {
   /**
    * 覆寫 stadium 半徑 R。
    *
-   * 出界門檻、26 段圍欄、地板 cuboid、投擲合法範圍全部由 `resolveArena()` 連動重算，
+   * 出界門檻、26 段圍欄、地板 cuboid、投擲合法範圍全部由 `resolveArena()` 連動重算,
    * 呼叫端無從指定不一致的組合。
    */
   fieldRadius?: number;
   /** 覆寫 stadium 直線段長度 L。 */
   fieldSegmentLength?: number;
+  /**
+   * 覆寫車體尺寸。底盤、前武器、輪位、最遠半徑全部由 `resolveVehicle()` 連動重算,
+   * §7.1 的投擲餘裕與 §7.2 的兩車最小距離也隨之改變。
+   */
+  vehicle?: VehicleOverride;
+  /**
+   * 採用 §7.1 新版投擲餘裕(`VEHICLE_MAX_RADIUS + THROW_CLEARANCE`,與車長掛鉤)。
+   *
+   * 預設 false,沿用 `PHYSICS_VERSION = 1` 凍結的固定值 0.08 m ——
+   * 直接換成新值會使既有 fixture 的投擲點變為不合法,v1 的 baseline 無法驗證。
+   * 正式採用時連同升版與 fixture 重產一起進行。
+   */
+  vehicleDerivedThrowMargin?: boolean;
+  /**
+   * 啟用 §7.2 兩車初始分離約束(`dist(A, B) ≥ 2 × maxRadius + 0.005`)。
+   *
+   * 與 `vehicleDerivedThrowMargin` 同屬取樣規則變更,同樣預設 false ——
+   * v1 的 20 組 fixture 中有投擲點違反此約束,直接啟用會使 baseline 無法驗證。
+   * 兩項於第三輪定案時一併寫死並升 `PHYSICS_VERSION` 至 2。
+   */
+  enforceMinThrowSeparation?: boolean;
 };
 
 export type SimOptions = {

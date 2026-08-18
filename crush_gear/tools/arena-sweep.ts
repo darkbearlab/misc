@@ -18,9 +18,22 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 import { FENCE_HEIGHT, THROW_LIMITS, TIRE_FRICTION_COEF } from '../src/data/constants.js';
 import { PHYSICS_VERSION } from '../src/data/version.js';
-import { resolveArena, stadiumDistanceIn, type ResolvedArena } from '../src/sim/arena.js';
+import {
+  resolveArena,
+  stadiumDistanceIn,
+  THROW_CLEARANCE,
+  VEHICLE_MAX_RADIUS,
+  type ResolvedArena,
+} from '../src/sim/arena.js';
 import { Rng } from '../src/sim/rng.js';
-import type { BattleInput, BattleReason, PhysicsOverride, ThrowParams } from '../src/sim/types.js';
+import {
+  rotateByQuat,
+  type BattleInput,
+  type BattleReason,
+  type PhysicsOverride,
+  type ThrowParams,
+} from '../src/sim/types.js';
+import { Vehicle } from '../src/sim/vehicle.js';
 import { createWorld, initPhysics } from '../src/sim/world.js';
 import { BATTLE_COUNT, measureSweep, SWEEP_SEED, type SweepMeasurement } from './measure.js';
 
@@ -123,8 +136,90 @@ type Row = {
   arena: ResolvedArena;
   fence: FenceCheck;
   sampling: Sampling;
+  spawn: SpawnCheck;
   sweep: SweepMeasurement;
 };
+
+type SpawnCheck = {
+  sampled: number;
+  touching: number;
+  penetrating: number;
+  deep: number;
+  worstPenetration: number;
+  tipPastFence: number;
+};
+
+/** 判定「兩台車互相穿插」的深度門檻(m)。淺於此值視為單純接觸。 */
+const DEEP_PENETRATION = 0.002;
+
+/**
+ * 生成瞬間兩車是否互相穿插、刃口是否越過圍欄內緣。
+ *
+ * 場地縮小後合法投擲區跟著縮小,到某個尺寸就再也放不下兩台分離的車 ——
+ * 這是「該組不可用」的判準,直接量而不用推估。
+ *
+ * **接觸與穿插要分開看**:兩車在生成時剛好碰到彼此是合理的遊戲情境(雙方同時投入);
+ * 生成在彼此**內部**才是數值產物 —— 解算器會以巨大的排斥脈衝彈開,那不是玩家投出來的結果。
+ * 因此以 `contactDist` 的正負區分,並記錄最深穿插量。
+ */
+function measureSpawnOverlap(
+  battles: readonly BattleInput[],
+  arena: ResolvedArena,
+  physics: PhysicsOverride,
+): SpawnCheck {
+  let touching = 0;
+  let penetrating = 0;
+  let deep = 0;
+  let worstPenetration = 0;
+  let tipPastFence = 0;
+  const sampled = Math.min(battles.length, 200);
+
+  for (let i = 0; i < sampled; i += 1) {
+    const battle = battles[i]!;
+    const world = createWorld(arena);
+    try {
+      const a = new Vehicle(world, battle.throwA, physics);
+      const b = new Vehicle(world, battle.throwB, physics);
+
+      // 刃口是否越過圍欄內緣(生成瞬間,尚未 step)
+      for (const car of [a, b]) {
+        const q = car.orientation();
+        const t = car.translation();
+        const tip = rotateByQuat(q, { x: 0, y: 0, z: arena.vehicleMaxRadius });
+        if (stadiumDistanceIn(arena.halfSegment, t.x + tip.x, t.z + tip.z) > arena.fieldRadius) {
+          tipPastFence += 1;
+        }
+      }
+
+      // 接觸流形在 step 中產生
+      world.step();
+      let contact = false;
+      let deepest = 0;
+      for (const ca of [a.chassis, a.weapon]) {
+        for (const cb of [b.chassis, b.weapon]) {
+          world.contactPair(ca, cb, (manifold) => {
+            const n = manifold.numContacts();
+            for (let k = 0; k < n; k += 1) {
+              const d = manifold.contactDist(k);
+              // Rapier 會在 prediction distance 內就回報接點,d > 0 代表尚未真正接觸
+              if (d <= 0) {
+                contact = true;
+                if (-d > deepest) deepest = -d;
+              }
+            }
+          });
+        }
+      }
+      if (contact) touching += 1;
+      if (deepest > 0) penetrating += 1;
+      if (deepest > DEEP_PENETRATION) deep += 1;
+      if (deepest > worstPenetration) worstPenetration = deepest;
+    } finally {
+      world.free();
+    }
+  }
+  return { sampled, touching, penetrating, deep, worstPenetration, tipPastFence };
+}
 
 function pct(n: number, total: number): string {
   return `${((100 * n) / total).toFixed(1)}%`;
@@ -151,7 +246,8 @@ function table(rows: readonly Row[]): string {
   );
   row('短邊 / 車長', (r) => ((r.arena.fieldRadius * 2) / VEHICLE_LENGTH).toFixed(1));
   row('OUT 門檻', (r) => r.arena.outThreshold.toFixed(3));
-  row('投擲最大距離', (r) => r.arena.throwMaxStadiumDistance.toFixed(3));
+  row('投擲餘裕', (r) => r.arena.throwMargin.toFixed(4));
+  row('投擲最大距離', (r) => r.arena.throwMaxStadiumDistance.toFixed(4));
   row('地板 half X/Z', (r) =>
     `${r.arena.floorHalfExtents.x.toFixed(2)}/${r.arena.floorHalfExtents.z.toFixed(2)}`,
   );
@@ -159,6 +255,11 @@ function table(rows: readonly Row[]): string {
   row('圍欄射線落空', (r) => String(r.fence.misses));
   row('圍欄最大誤差 mm', (r) => (r.fence.worstError * 1000).toFixed(2));
   row('取樣拒絕率', (r) => `${(r.sampling.rejectRate * 100).toFixed(1)}%`);
+  row('生成即接觸', (r) => pct(r.spawn.touching, r.spawn.sampled));
+  row('生成即穿插 ★', (r) => pct(r.spawn.penetrating, r.spawn.sampled));
+  row('穿插 >2mm ★', (r) => pct(r.spawn.deep, r.spawn.sampled));
+  row('最深穿插 mm', (r) => (r.spawn.worstPenetration * 1000).toFixed(1));
+  row('生成刃口穿牆', (r) => pct(r.spawn.tipPastFence, r.spawn.sampled * 2));
   gap();
   row('A_WINS', (r) => String(r.sweep.results.A_WINS));
   row('B_WINS', (r) => String(r.sweep.results.B_WINS));
@@ -213,16 +314,20 @@ async function main(): Promise<void> {
   const rows: Row[] = [];
   for (const group of GROUPS) {
     process.stderr.write(`  ${group.name} (R ${String(group.radius)} / L ${String(group.segment)}) …\n`);
-    // 基線那一組不傳覆寫，確保走預設路徑
-    const isBaseline = group.name === '基線';
-    const physics: PhysicsOverride | undefined = isBaseline
-      ? undefined
-      : { fieldRadius: group.radius, fieldSegmentLength: group.segment };
+    // 五組**全部**採用 §7 新版投擲餘裕（與車長掛鉤），基線也不例外 ——
+    // 否則基線與其餘組別的投擲規則不同，比較無效。
+    // 因此基線這一組也走覆寫路徑，不是 PHYSICS_VERSION 1 的預設路徑。
+    const physics: PhysicsOverride = {
+      fieldRadius: group.radius,
+      fieldSegmentLength: group.segment,
+      vehicleDerivedThrowMargin: true,
+    };
     const arena = resolveArena(physics);
     const fence = checkFence(arena);
     const sampling = sampleBattles(arena);
+    const spawn = measureSpawnOverlap(sampling.battles, arena, physics);
     const sweep = await measureSweep(sampling.battles, physics);
-    rows.push({ group, arena, fence, sampling, sweep });
+    rows.push({ group, arena, fence, sampling, spawn, sweep });
   }
 
   if (process.argv.includes('--json')) {
@@ -234,9 +339,20 @@ async function main(): Promise<void> {
   out.push(`# 場地尺寸單變數掃描（μ = ${String(TIRE_FRICTION_COEF)}，車體常數不變，未升版）`);
   out.push('');
   out.push(
-    `${String(BATTLE_COUNT)} 場 / 組，seed ${String(SWEEP_SEED)}。**每組使用自己的投擲合法範圍**（R − 0.08），` +
-      `因此投擲參數逐組不同，這是縮放場地的必然結果。圍欄高度維持 ${String(FENCE_HEIGHT)} m。`,
+    `${String(BATTLE_COUNT)} 場 / 組,seed ${String(SWEEP_SEED)}。μ = ${String(TIRE_FRICTION_COEF)},車體常數不變。` +
+      `圍欄高度維持 ${String(FENCE_HEIGHT)} m。投擲餘裕採 §7 新版(與車長掛鉤),五組一致為 ` +
+      `${(VEHICLE_MAX_RADIUS + THROW_CLEARANCE).toFixed(4)} m —— **基線組亦走覆寫路徑,不是 PHYSICS_VERSION 1 的預設路徑**。`,
   );
+  out.push('');
+  const caveat: string[] = [
+    '> **方法學限制**:各組的投擲合法範圍為 `R − 0.1201`,隨 R 縮小而縮小,因此**每組的輸入分布不同**。'
+      + '這不是嚴格的單變數實驗 —— 場地尺寸與投擲分布兩個因子同時變動,兩者的效果在此無法分離。',
+    '>',
+    '> 這是縮放場地的必然結果:合法投擲區由 R 定義,不可能一邊縮場地一邊沿用同一組投擲點'
+      + '(舊投擲點在小場地中不合法)。因此本表可用於「哪一組整體表現較好」的比較,'
+      + '**不可用於「場地尺寸單獨造成多少影響」的因果歸因**,結論強度須據此打折。',
+  ];
+  out.push(caveat.join('\n'));
   out.push('');
   out.push(table(rows));
   out.push('');

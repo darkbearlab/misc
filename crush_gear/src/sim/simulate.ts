@@ -12,7 +12,6 @@
 import {
   CHECKSUM_SAMPLE_INTERVAL,
   DT,
-  THROW_FENCE_MARGIN,
   THROW_LIMITS,
   TIMEOUT_FRAMES,
 } from '../data/constants.js';
@@ -64,7 +63,7 @@ export function validateThrowParams(
     throw new RangeError(
       `ThrowParams.${label} spawn point (${p.x}, ${p.z}) is ${distance.toFixed(4)} m from the ` +
         `stadium centre line; it must stay within ${String(arena.throwMaxStadiumDistance)} m ` +
-        `(i.e. at least ${String(THROW_FENCE_MARGIN)} m clear of the fence).`,
+        `(i.e. at least ${String(arena.throwMargin)} m clear of the fence).`,
     );
   }
   checkRange(`${label}.y`, p.y, THROW_LIMITS.y.min, THROW_LIMITS.y.max, true);
@@ -85,6 +84,33 @@ export function validateBattleInput(
   }
   validateThrowParams('throwA', input.throwA, arena);
   validateThrowParams('throwB', input.throwB, arena);
+  validateThrowSeparation(input, arena);
+}
+
+/**
+ * §7.2 兩車初始分離。
+ *
+ * 以**投擲點的水平距離**判定,不做碰撞體重疊檢測 —— 後者需要先建立世界才能判斷,
+ * 會破壞「參數驗證先於模擬」的分層。保守外接圓(`2 × maxRadius`)已足以保證不重疊,
+ * 多出的 `MIN_SEPARATION_CLEARANCE` 是容差。
+ *
+ * 距離只取 XZ:兩車可以投在不同高度,但那不構成「分離」—— 落地後仍會重疊。
+ *
+ * `arena.minThrowSeparation` 為 0 時不檢查,即 `PHYSICS_VERSION = 1` 的凍結行為。
+ */
+export function validateThrowSeparation(input: BattleInput, arena: ResolvedArena): void {
+  const required = arena.minThrowSeparation;
+  if (!(required > 0)) return;
+  const dx = input.throwA.x - input.throwB.x;
+  const dz = input.throwA.z - input.throwB.z;
+  const distance = Math.sqrt(dx * dx + dz * dz);
+  if (distance < required) {
+    throw new RangeError(
+      `Throw points are ${distance.toFixed(4)} m apart horizontally; §7.2 requires at least ` +
+        `${String(required)} m (2 x vehicle max radius + clearance). ` +
+        `The two cars would spawn intersecting each other.`,
+    );
+  }
 }
 
 /**

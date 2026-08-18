@@ -19,9 +19,6 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { Collider, Ray, RigidBody, World } from '@dimforge/rapier3d-compat';
 
 import {
-  CHASSIS_HALF_EXTENTS,
-  CHASSIS_MASS,
-  CHASSIS_OFFSET,
   MAX_ANGULAR_SPEED,
   MAX_LINEAR_SPEED,
   SUSPENSION_DAMPING,
@@ -29,16 +26,12 @@ import {
   SUSPENSION_REST_LENGTH,
   SUSPENSION_STIFFNESS,
   TIRE_FRICTION_COEF,
-  TOTAL_MASS,
   VEHICLE_FRICTION,
-  VEHICLE_LOWEST_Y,
   VEHICLE_RESTITUTION,
-  WEAPON_HULL,
-  WEAPON_MASS,
-  WHEEL_ANCHORS,
   WHEEL_SURFACE_SPEED,
 } from '../data/constants.js';
 import { tireForce } from './tire.js';
+import { resolveVehicle, type Point3, type ResolvedVehicle } from './vehicle-shape.js';
 import {
   add,
   cross,
@@ -64,7 +57,9 @@ const LOCAL_UP: Vec3 = { x: 0, y: 1, z: 0 };
 const AXIS_X: Vec3 = { x: 1, y: 0, z: 0 };
 const AXIS_Y: Vec3 = { x: 0, y: 1, z: 0 };
 
-const WEAPON_POINTS = new Float32Array(WEAPON_HULL.flatMap((p) => [p[0], p[1], p[2]]));
+function weaponPoints(hull: readonly Point3[]): Float32Array {
+  return new Float32Array(hull.flatMap((p) => [p[0], p[1], p[2]]));
+}
 
 /**
  * §6.3 的兩項幾何條件，加上 v1.0 §6.3 的刮地檢查。
@@ -79,34 +74,35 @@ const WEAPON_POINTS = new Float32Array(WEAPON_HULL.flatMap((p) => [p[0], p[1], p
  * 錨點與車體最低點的落差 0.005 = restLength − maxTravel，
  * 因此懸吊恰好用完 maxTravel 的行程時底盤才會觸地。
  */
-function assertVehicleGeometry(): void {
-  for (let i = 0; i < WHEEL_ANCHORS.length; i += 1) {
-    const anchor = WHEEL_ANCHORS[i] as readonly [number, number, number];
+export function assertVehicleGeometry(shape: ResolvedVehicle): void {
+  const half = shape.chassisHalfExtents;
+  const lowestY = shape.lowestY;
 
-    if (
-      Math.abs(anchor[0]) >= CHASSIS_HALF_EXTENTS.x ||
-      Math.abs(anchor[2]) >= CHASSIS_HALF_EXTENTS.z
-    ) {
+  for (let i = 0; i < shape.wheelAnchors.length; i += 1) {
+    const anchor = shape.wheelAnchors[i] as Point3;
+
+    if (Math.abs(anchor[0]) >= half.x || Math.abs(anchor[2]) >= half.z) {
       throw new Error(
         `Wheel anchor ${i} at (${anchor[0]}, ${anchor[2]}) lies outside the chassis footprint ` +
-          `(±${CHASSIS_HALF_EXTENTS.x}, ±${CHASSIS_HALF_EXTENTS.z}); the wheel would hang off the body.`,
+          `(±${half.x}, ±${half.z}); the wheel would hang off the body.`,
       );
     }
 
-    if (!(anchor[1] > VEHICLE_LOWEST_Y)) {
+    if (!(anchor[1] > lowestY)) {
       throw new Error(
         `Wheel anchor ${i} height (y=${anchor[1]}) must be strictly above the vehicle's ` +
-          `lowest point (y=${VEHICLE_LOWEST_Y}).`,
+          `lowest point (y=${lowestY}).`,
       );
     }
   }
 
-  const anchorY = WHEEL_ANCHORS[0]?.[1] as number;
-  const staticCompression = (TOTAL_MASS * 9.81) / (WHEEL_ANCHORS.length * SUSPENSION_STIFFNESS);
+  const anchorY = shape.wheelAnchors[0]?.[1] as number;
+  const staticCompression =
+    (shape.totalMass * 9.81) / (shape.wheelAnchors.length * SUSPENSION_STIFFNESS);
   const staticContactY = anchorY - (SUSPENSION_REST_LENGTH - staticCompression);
-  if (!(VEHICLE_LOWEST_Y > staticContactY)) {
+  if (!(lowestY > staticContactY)) {
     throw new Error(
-      `Chassis geometry invalid: lowest point (y=${VEHICLE_LOWEST_Y}) does not clear the static ` +
+      `Chassis geometry invalid: lowest point (y=${lowestY}) does not clear the static ` +
         `ride contact height (y=${staticContactY}); the chassis would scrape the ground.`,
     );
   }
@@ -182,8 +178,13 @@ export class Vehicle {
   linearClampHits = 0;
   angularClampHits = 0;
 
+  /** 本車實際使用的幾何。未覆寫時就是 `DEFAULT_VEHICLE`（同一批 double）。 */
+  readonly shape: ResolvedVehicle;
+
   constructor(world: World, params: ThrowParams, physics?: PhysicsOverride) {
-    assertVehicleGeometry();
+    const shape = resolveVehicle(physics?.vehicle);
+    this.shape = shape;
+    assertVehicleGeometry(shape);
 
     this.tireFrictionCoef = physics?.tireFrictionCoef ?? TIRE_FRICTION_COEF;
     this.wheelSurfaceSpeed = physics?.wheelSurfaceSpeed ?? WHEEL_SURFACE_SPEED;
@@ -203,24 +204,24 @@ export class Vehicle {
 
     this.chassis = world.createCollider(
       RAPIER.ColliderDesc.cuboid(
-        CHASSIS_HALF_EXTENTS.x,
-        CHASSIS_HALF_EXTENTS.y,
-        CHASSIS_HALF_EXTENTS.z,
+        shape.chassisHalfExtents.x,
+        shape.chassisHalfExtents.y,
+        shape.chassisHalfExtents.z,
       )
-        .setTranslation(CHASSIS_OFFSET.x, CHASSIS_OFFSET.y, CHASSIS_OFFSET.z)
-        .setMass(CHASSIS_MASS)
+        .setTranslation(shape.chassisOffset.x, shape.chassisOffset.y, shape.chassisOffset.z)
+        .setMass(shape.chassisMass)
         .setFriction(VEHICLE_FRICTION)
         .setRestitution(VEHICLE_RESTITUTION),
       this.body,
     );
 
-    const weaponDesc = RAPIER.ColliderDesc.convexHull(WEAPON_POINTS);
+    const weaponDesc = RAPIER.ColliderDesc.convexHull(weaponPoints(shape.weaponHull));
     if (weaponDesc === null) {
       throw new Error('Failed to build the front-weapon convex hull from WEAPON_HULL.');
     }
     this.weapon = world.createCollider(
       weaponDesc
-        .setMass(WEAPON_MASS)
+        .setMass(shape.weaponMass)
         .setFriction(VEHICLE_FRICTION)
         .setRestitution(VEHICLE_RESTITUTION),
       this.body,
@@ -268,7 +269,7 @@ export class Vehicle {
   }
 
   /**
-   * 每幀套用 4 個輪位的懸吊力與輪胎力，順序固定為 WHEEL_ANCHORS 的陣列順序（§9.3）。
+   * 每幀套用 4 個輪位的懸吊力與輪胎力，順序固定為 shape.wheelAnchors 的陣列順序（§9.3）。
    *
    * 懸吊（§6.3）：
    *   1. 自 anchor 沿車體 −Y 方向 raycast，最大距離 restLength + maxTravel
@@ -285,7 +286,8 @@ export class Vehicle {
    *   不改變任何計算內容或順序；不傳時整條路徑與 Phase 0 位元完全相同。
    */
   applyWheelForces(world: World, dt: number, diag?: WheelDiagnosticsWriter): void {
-    const diagBase = diag === undefined ? 0 : diag.frame * WHEEL_ANCHORS.length;
+    const anchors = this.shape.wheelAnchors;
+    const diagBase = diag === undefined ? 0 : diag.frame * anchors.length;
     const body = this.body;
     const s = this.state;
     const translation: Vec3 = { x: s.tx, y: s.ty, z: s.tz };
@@ -300,8 +302,8 @@ export class Vehicle {
 
     this.ray.dir = suspensionDown;
 
-    for (let i = 0; i < WHEEL_ANCHORS.length; i += 1) {
-      const anchorLocal = WHEEL_ANCHORS[i] as readonly [number, number, number];
+    for (let i = 0; i < anchors.length; i += 1) {
+      const anchorLocal = anchors[i] as Point3;
       const anchorWorld = add(
         translation,
         rotateByQuat(rotation, {
