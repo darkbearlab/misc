@@ -1,6 +1,34 @@
 # 部署：replay 播放器
 
-網址 **<https://darkbearlab.github.io/misc/player/>**
+網址 **<https://darkbearlab.github.io/misc/player/>** —— **尚未生效,見下方「待解的阻塞」。**
+
+## ⚠️ 待解的阻塞：Pages 的來源不是 `main`
+
+實測發現 `darkbearlab/misc` 的 GitHub Pages **不是**從 `main` 建置,而是從
+分支 `claude/dol-value-tweaks-mha91g`。證據:
+
+| 觀察 | 結果 |
+|---|---|
+| 最後一次 `pages build and deployment` | 2026-08-11,commit `4b4a115` |
+| `4b4a115` 屬於 | `claude/dol-value-tweaks-mha91g` 的 head |
+| 該分支根目錄 | `README.md`、`dol/`、`tools/`、DoL 的 zip |
+| `/misc/dol/` | 200（該分支的 launcher 頁） |
+| `/misc/player/` 與 `/misc/crush_gear/` | 404（兩者都只存在於 `main`） |
+| 推送到 `main` 之後 | 完全沒有觸發 pages build |
+
+因此 workflow 把產物 commit 到 `main` 的 `player/` 是正確執行的（`player/` 確實在
+`main` 上），但 Pages 永遠不會提供它。要讓網址生效必須三選一，**都需要設計方裁決**：
+
+**A. 把 Pages 來源改為 `main`**（Settings → Pages → Branch: main / root）
+現有站台內容（`README.md`、`dol/`）需一併合併進 `main`，否則入口頁會消失。
+若那個分支本來就打算合併，這是最乾淨的一條。
+
+**B. workflow 改推到 `claude/dol-value-tweaks-mha91g`**
+不動任何設定，改一行 workflow 即可生效。
+代價是把播放器的部署綁在一個 DoL 的工作分支上；該分支被刪除或合併時會壞掉。
+
+**C. 另建 `gh-pages` 分支**，內容為現有站台 + `player/`，再把 Pages 指向它。
+需要設定變更，且要先把現有內容複製過去。
 
 ## 機制
 
@@ -56,8 +84,9 @@ workflow 以 `--base=/${{ github.event.repository.name }}/player/` 指定,由 re
 —— 只是沒有 run 出現,比失敗更難察覺。
 要在文件中提及時,寫成「CI 的略過標記」或拆開寫。
 
-** 與  不能並用。** GitHub 不允許同一個事件同時指定兩者,
+**`paths` 與 `paths-ignore` 不能並用。** GitHub 不允許同一個事件同時指定兩者,
 這樣寫整份 workflow 解析失敗。失敗的形式極不明顯:Actions 頁面上該 run 的名稱會變成
-**檔案路徑**而非  欄位,job 數為 0,看起來像「跑了但什麼都沒做」。
-本專案的迴圈防護因此改為只靠  ——  不在  之列,
-bot 的 commit 只動 ,自然不符合任何一條,不會觸發自己。
+**檔案路徑**而非 `name:` 欄位,job 數為 0,看起來像「跑了但什麼都沒做」,
+而不是像語法錯誤。
+本專案的迴圈防護因此改為只靠 `paths` —— `player/` 不在 `paths` 之列,
+而 bot 的 commit 只動 `player/`,自然不符合任何一條,不會觸發自己。
