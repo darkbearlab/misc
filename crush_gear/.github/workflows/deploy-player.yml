@@ -1,0 +1,96 @@
+name: crush_gear replay player — deploy to player/
+
+# Phase 1-e §5（修訂）—— 把 replay 播放器建置後 commit 回 main 的 player/ 子目錄。
+#
+# ⚠️ 這份是**專案內的參考副本**。GitHub Actions 只讀取 repo 根目錄的 .github/workflows/，
+# 子目錄裡的 workflow 不會執行。實際生效的是根目錄的 crush-gear-deploy-player.yml。
+#
+# ## 為什麼不用 actions/deploy-pages
+#
+# misc 的 Pages 站台底下已有其他內容與一個入口頁，必須保留。
+# 把 Source 改成「GitHub Actions」會讓那份 artifact 取代整個站台，因此不採用；
+# 也不更動任何 repo 設定。改為沿用現有的分支來源，只往站台裡多放一個子目錄。
+#
+# ## base path
+#
+# 產物放在 player/，站台根是 /misc/，因此資產 URL 必須以 /misc/player/ 開頭。
+# Vite 預設 base 是 `/`，直接部署會讓 index.html 去要 /assets/… 而 404 ——
+# 畫面全白且沒有任何錯誤提示。這裡以 --base 指定，不改 vite.config.ts。
+#
+# ## 避免自我觸發
+#
+# 這個 workflow 會 push 回同一個分支，若不設防就會無限觸發自己。兩道保險：
+#   1. paths-ignore 排除 player/**，本 workflow 的 commit 只動那裡
+#   2. commit 訊息帶 [skip ci]
+# 只用其中一道也夠，但兩道的成本是零，而失控的迴圈要人工介入才停得下來。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crush_gear/**'
+      - '.github/workflows/crush-gear-deploy-player.yml'
+    paths-ignore:
+      - 'player/**'
+  workflow_dispatch:
+
+# 需要寫回 repo，因此不是唯讀。
+permissions:
+  contents: write
+
+# 連續 push 時只跑最後一次；中途取消不會留下半套產物，因為 commit 是最後一步。
+concurrency:
+  group: crush-gear-player
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: crush_gear
+
+jobs:
+  build-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: crush_gear/package-lock.json
+
+      # npm ci 而非 npm install：lock file 決定裝到哪一個 wasm binary。
+      - run: npm ci
+
+      # 播放器只是讀軌跡，但軌跡是由 src/sim 現場算出來的 ——
+      # 部署一份跑不出正確結果的播放器沒有意義，因此建置前先驗。
+      - name: Verify determinism fixtures
+        run: npx tsx tools/verify-platform.ts --compare fixtures/platform/baseline.json
+
+      - name: Build
+        run: npm run build -- --base=/${{ github.event.repository.name }}/player/
+
+      - name: Copy build into player/
+        working-directory: .
+        run: |
+          rm -rf player
+          mkdir -p player
+          cp -r crush_gear/dist/. player/
+          # Pages 預設走 Jekyll，會忽略底線開頭的檔案並嘗試處理其餘內容。
+          # .nojekyll 讓它原樣提供靜態檔。
+          touch player/.nojekyll
+
+      - name: Commit if changed
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add player
+          if git diff --cached --quiet; then
+            echo "player/ unchanged; nothing to commit."
+            exit 0
+          fi
+          git commit -m "crush_gear: rebuild replay player [skip ci]"
+          # 併發已由 concurrency 擋掉，這裡的 rebase 是防其他 workflow 同時寫入。
+          git pull --rebase origin main
+          git push origin HEAD:main

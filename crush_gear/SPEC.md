@@ -72,6 +72,12 @@ tools/
   pool.ts             批次模擬的 worker pool
   sim-worker.ts       worker 端點
   verify-platform.ts  跨平台決定性驗證
+  measure.ts          共用的量測與取樣器(Phase 1.5)
+  baseline-report.ts  基線報表
+  mu-sweep.ts         μ 單變數掃描
+  arena-sweep.ts      場地尺寸掃描
+  vehicle-scan.ts     車體 × 場地的靜態分析
+  mobile-probe.ts     行動版面截圖與效能量測(CDP 驅動 Chrome)
 tests/
   determinism.test.ts   §9 決定性 / §11.1 / §9.4 平行化一致性
   acceptance.test.ts    §6 幾何驗證 / §11.2–§11.7
@@ -87,6 +93,23 @@ vite.config.ts        ┘
 .github/workflows/
   platform-determinism.yml
 ```
+
+### tools/ 不屬模擬核心,不受 §3 禁令約束
+
+**§3 的禁令約束的是 `src/sim/`**,理由是那裡的任何非決定性都會直接破壞跨平台一致性 ——
+一個 `Date.now()` 或一次檔案讀取就足以讓同一組輸入在兩台機器上產生不同的勝負。
+
+`tools/` 是**量測、驗證與批次執行**的一層,本來就必須做 §3 所禁止的事:
+讀寫檔案、啟動子行程與瀏覽器、讀牆上時間量測耗時、使用 `worker_threads` 平行化。
+這些不構成風險,因為 **`tools/` 從不參與模擬** —— 它只是從外面呼叫 `simulate()`
+並觀察結果。模擬本身仍然完全在 `src/sim/` 內,仍然完全決定性。
+
+`tools/mobile-probe.ts` 是這條界線最明顯的例子:它啟動一個真的 Chrome、
+套用行動裝置的視窗尺寸與 CPU 節流、截圖、把讀數寫成 JSON。
+這些全部是量測所必需,而它量的是一個已經跑完的播放器。
+
+**唯一的例外是 `tools/sim-worker.ts`**:它在 worker 執行緒裡呼叫 `simulate()`,
+因此 §9.4 要求平行執行的結果必須與單執行緒逐位元相同,並有測試把關。
 
 **分層相依方向**(單向,不得反向):
 

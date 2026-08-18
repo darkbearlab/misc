@@ -259,6 +259,45 @@
         background: linear-gradient(to top, rgba(9, 12, 18, 0.94), rgba(9, 12, 18, 0.72) 70%, transparent);
         touch-action: none;
       }
+      /* 產生進度（§P1.9）：不確定進度，只表示「還在跑」 */
+      .progress {
+        height: 3px;
+        margin: -4px 0 2px;
+        border-radius: 2px;
+        background: transparent;
+        overflow: hidden;
+      }
+      .progress.on {
+        background: rgba(79, 163, 255, 0.18);
+      }
+      .progress-bar {
+        width: 34%;
+        height: 100%;
+        border-radius: 2px;
+        background: var(--accent);
+        opacity: 0;
+      }
+      .progress.on > .progress-bar {
+        opacity: 1;
+        animation: indeterminate 1.1s ease-in-out infinite;
+      }
+      @keyframes indeterminate {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(330%);
+        }
+      }
+      /* 尊重系統的減少動態設定：改為靜態的半透明填滿 */
+      @media (prefers-reduced-motion: reduce) {
+        .progress.on > .progress-bar {
+          width: 100%;
+          animation: none;
+          opacity: 0.5;
+        }
+      }
+
       .scrub-wrap {
         position: relative;
         /* 拖曳氣泡在滑桿上方 42px 處，手指不會遮住（§2）。 */

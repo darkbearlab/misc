@@ -190,6 +190,7 @@ export class Controls {
   private readonly timeline: HTMLInputElement;
   private readonly frameReadout: HTMLElement;
   private readonly scrubBubble: HTMLElement;
+  private readonly progress: HTMLElement;
   private randomCounter = 0;
   /** 使用者正在拖曳時間軸時，暫停由播放迴圈回寫滑桿位置。 */
   private scrubbing = false;
@@ -202,6 +203,12 @@ export class Controls {
     this.transport = el('div', 'transport');
 
     // ── 播放控制列（§2）───────────────────────────────────────────────
+    // 產生進度（§P1.9）：不確定進度指示，見 setBusy 的說明。
+    this.progress = el('div', 'progress');
+    this.progress.setAttribute('role', 'progressbar');
+    this.progress.append(el('div', 'progress-bar'));
+    this.transport.append(this.progress);
+
     // 時間軸 + 拖曳氣泡
     const scrubWrap = el('div', 'scrub-wrap');
     this.timeline = el('input', 'timeline');
@@ -494,6 +501,20 @@ export class Controls {
 
   setOutcome(text: string): void {
     this.outcomeLine.textContent = text;
+  }
+
+  /**
+   * 切換「軌跡產生中」的狀態。
+   *
+   * 刻意**不停用任何控制項**：產生跑在 Worker 上，主執行緒仍然順暢，
+   * 而且上一份軌跡還留著 —— 使用者可以一邊等新的一邊繼續看舊的。
+   * 停用只會讓介面看起來壞掉。
+   *
+   * 進度是不確定的（只有經過時間，沒有百分比）：`simulate()` 不提供幀數進度，
+   * 要取得它必須在物理主迴圈裡插入回呼，不在本階段的授權範圍內。
+   */
+  setBusy(busy: boolean): void {
+    this.progress.classList.toggle('on', busy);
   }
 
   setPlaying(playing: boolean): void {

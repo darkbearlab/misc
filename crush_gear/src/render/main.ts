@@ -18,7 +18,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { WHEEL_SURFACE_SPEED } from '../data/constants.js';
-import { generateTrajectory, type Trajectory } from '../replay/trajectory.js';
+import { TrajectoryCancelledError, TrajectoryClient } from './trajectory-client.js';
+import type { Trajectory } from '../replay/trajectory.js';
 import { initPhysics } from '../sim/world.js';
 import type { BattleInput } from '../sim/types.js';
 import { Controls, type CameraMode, type QualityLevel } from '../ui/controls.js';
@@ -132,8 +133,17 @@ window.visualViewport?.addEventListener('resize', resize);
 let player: TrajectoryPlayer | null = null;
 let cameraMode: CameraMode = 'overview';
 let wheelSpin = 0;
-let generating = false;
 let lastGenerationMs = 0;
+let lastViaWorker = false;
+
+/**
+ * 軌跡產生的 Worker 客端（§P1.9，Phase 1-e 修訂）。
+ *
+ * 產生本身沒有任何改變 —— 仍是完整跑完一場才回傳一份定案的軌跡（§P1.2.1）。
+ * 換的只是它跑在哪條執行緒上：主執行緒同步跑 7200 幀的場次，在中階手機上實測
+ * 凍結 1.7 秒，而逾時場次佔 16.8%。
+ */
+const trajectoryClient = new TrajectoryClient();
 
 const scratchPosition = new THREE.Vector3();
 const scratchRotation = new THREE.Quaternion();
@@ -221,21 +231,24 @@ for (const [feature, on] of Object.entries(controls.initialOverlayState())) {
 resize();
 
 async function run(input: BattleInput): Promise<void> {
-  if (generating) return;
-  generating = true;
+  controls.setBusy(true);
   controls.setStatus('產生軌跡中…');
   controls.setOutcome('');
   try {
-    const started = performance.now();
     // 一律附帶診斷：實測不增加產生時間，而輪子的懸吊位置需要接觸點才畫得對。
-    const trajectory = await generateTrajectory(input, { diagnostics: true });
-    const elapsed = performance.now() - started;
-    attach(trajectory, elapsed);
+    const outcome = await trajectoryClient.generate(input, { diagnostics: true }, (state) => {
+      controls.setStatus(`產生軌跡中… ${(state.elapsedMs / 1000).toFixed(1)} 秒`);
+    });
+    lastViaWorker = outcome.viaWorker;
+    attach(outcome.trajectory, outcome.elapsedMs);
   } catch (error) {
+    // 被新請求取代不是錯誤 —— 使用者連按兩次時舊的那次本來就該消失，
+    // 而且新的那次會自己接管狀態列，這裡不能覆寫它。
+    if (error instanceof TrajectoryCancelledError) return;
     controls.setStatus(`失敗：${error instanceof Error ? error.message : String(error)}`);
     player = null;
   } finally {
-    generating = false;
+    if (!trajectoryClient.busy) controls.setBusy(false);
   }
 }
 
@@ -245,6 +258,7 @@ function attach(trajectory: Trajectory, generationMs: number): void {
   lastGenerationMs = generationMs;
   controls.setStatus(
     `${String(trajectory.frameCount)} 幀，產生耗時 ${generationMs.toFixed(0)} ms` +
+      `${lastViaWorker ? '（Worker）' : '（主執行緒）'}` +
       `（physicsVersion ${String(trajectory.meta.physicsVersion)}）`,
   );
   controls.setOutcome(describeOutcome(trajectory));
@@ -260,10 +274,22 @@ let previousTime = 0;
 let fpsFrames = 0;
 let fpsSince = 0;
 let fps = 0;
+/**
+ * 相鄰兩次 rAF 之間的最長間隔（ms）。
+ *
+ * 這才是「畫面有沒有凍住」的直接量度。fps 是 500 ms 的平均，一次 1.7 秒的同步阻塞
+ * 會被它平滑掉一部分；最長間隔則直接就是阻塞時間。
+ * 量測工具在觸發產生之前重設它，產生結束後讀出來。
+ */
+let maxFrameGapMs = 0;
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const deltaSeconds = previousTime === 0 ? 0 : (now - previousTime) / 1000;
+  if (previousTime !== 0) {
+    const gap = now - previousTime;
+    if (gap > maxFrameGapMs) maxFrameGapMs = gap;
+  }
   previousTime = now;
 
   // 每 500 ms 更新一次讀數；每幀更新會讓數字跳到讀不出來。
@@ -342,6 +368,10 @@ declare global {
       quality: () => string;
       pixelRatio: () => number;
       generationMs: () => number;
+      viaWorker: () => boolean;
+      busy: () => boolean;
+      resetFrameGap: () => void;
+      maxFrameGapMs: () => number;
       frameCount: () => number;
       isPlaying: () => boolean;
       run: (name: string) => Promise<void>;
@@ -353,6 +383,12 @@ window.__player = {
   quality: () => quality.resolved,
   pixelRatio: () => renderer.getPixelRatio(),
   generationMs: () => lastGenerationMs,
+  viaWorker: () => lastViaWorker,
+  busy: () => trajectoryClient.busy,
+  resetFrameGap: () => {
+    maxFrameGapMs = 0;
+  },
+  maxFrameGapMs: () => maxFrameGapMs,
   frameCount: () => player?.trajectory.frameCount ?? 0,
   isPlaying: () => player?.isPlaying ?? false,
   run: async (name: string) => {
