@@ -7,6 +7,11 @@
  *
  * **這裡不持有 Rapier 世界、不呼叫 `world.step()`、不依 rAF 的 delta 推進任何物理。**
  * rAF 的 delta 只用來換算「該顯示第幾幀」，模擬結果早在第 1 段就完全定案。
+ *
+ * ## 行動裝置適配（Phase 1-e）
+ *
+ * 三件事在這一層處理：觸控手勢的對應、版面的掛載位置、以及品質等級的套用。
+ * 三者都只動渲染與 DOM —— 模擬完全沒有變化，`verify-platform --compare` 仍須 20/20。
  */
 
 import * as THREE from 'three';
@@ -16,7 +21,7 @@ import { WHEEL_SURFACE_SPEED } from '../data/constants.js';
 import { generateTrajectory, type Trajectory } from '../replay/trajectory.js';
 import { initPhysics } from '../sim/world.js';
 import type { BattleInput } from '../sim/types.js';
-import { Controls, type CameraMode } from '../ui/controls.js';
+import { Controls, type CameraMode, type QualityLevel } from '../ui/controls.js';
 import {
   applyOverviewCamera,
   arenaExtent,
@@ -25,6 +30,7 @@ import {
 } from './scene.js';
 import { DebugOverlay, type OverlayFeature } from './overlay.js';
 import { describeOutcome, TrajectoryPlayer } from './player.js';
+import { applyQuality, resolveQuality, type QualitySettings } from './quality.js';
 import { buildVehicle, spinWheels, updateWheels, type VehicleView } from './vehicle.js';
 import {
   COLOR_CAR_A,
@@ -50,6 +56,11 @@ for (const [path, mod] of Object.entries(sampleModules)) {
   SAMPLES.set(name, { seed: mod.seed, throwA: mod.throwA, throwB: mod.throwB });
 }
 
+// ── 品質 ────────────────────────────────────────────────────────────────
+
+// 起始等級要在建立 renderer 之前決定 —— MSAA 在 WebGL context 建立時就固定了。
+let quality: QualitySettings = resolveQuality('auto');
+
 // ── 場景 ────────────────────────────────────────────────────────────────
 
 const app = document.querySelector('#app');
@@ -59,18 +70,31 @@ const viewport = document.createElement('div');
 viewport.className = 'viewport';
 app.append(viewport);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: quality.antialias });
 renderer.shadowMap.enabled = true;
 // PCFSoftShadowMap 已於 three r18x 標記為 deprecated（會退回 PCFShadowMap 並印警告）。
 renderer.shadowMap.type = THREE.PCFShadowMap;
 viewport.append(renderer.domElement);
 
-const scene = buildScene();
+const scene = buildScene(quality.curveSegments);
 const camera = buildCamera(1);
+applyQuality(renderer, scene, quality);
+
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.target.set(0, 0, 0);
 orbit.enabled = false;
+// 觸控手勢對應（§1）：單指旋轉、雙指縮放與平移。
+// three 的預設值本來就是這組，但它是預設而非保證 —— 明寫下來，
+// 免得日後升版改了預設值就悄悄壞掉。
+orbit.touches.ONE = THREE.TOUCH.ROTATE;
+orbit.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.12;
+// 手指移動一小段就要有明顯回饋，但不能靈敏到難以定位。
+orbit.rotateSpeed = 0.8;
+orbit.zoomSpeed = 0.9;
+orbit.minDistance = 0.15;
+orbit.maxDistance = arenaExtent() * 4;
 
 const views: VehicleView[] = [buildVehicle(COLOR_CAR_A), buildVehicle(COLOR_CAR_B)];
 for (const view of views) scene.add(view.root);
@@ -82,6 +106,11 @@ viewport.append(labelLayer);
 const overlay = new DebugOverlay(labelLayer);
 scene.add(overlay.group);
 
+// 效能讀數（§4 驗收需要實測值）
+const hud = document.createElement('div');
+hud.className = 'hud';
+viewport.append(hud);
+
 function resize(): void {
   const width = viewport.clientWidth;
   const height = viewport.clientHeight;
@@ -91,6 +120,12 @@ function resize(): void {
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
+// 旋轉螢幕後 clientWidth/Height 不一定馬上更新，補一次延後的量測。
+window.addEventListener('orientationchange', () => {
+  setTimeout(resize, 250);
+});
+// 行動瀏覽器的網址列收合會改變可視高度，但不一定觸發 resize。
+window.visualViewport?.addEventListener('resize', resize);
 
 // ── 播放狀態 ────────────────────────────────────────────────────────────
 
@@ -98,6 +133,7 @@ let player: TrajectoryPlayer | null = null;
 let cameraMode: CameraMode = 'overview';
 let wheelSpin = 0;
 let generating = false;
+let lastGenerationMs = 0;
 
 const scratchPosition = new THREE.Vector3();
 const scratchRotation = new THREE.Quaternion();
@@ -122,6 +158,11 @@ const controls = new Controls(
       cameraMode = mode;
       orbit.enabled = mode === 'free';
       if (mode === 'overview') applyOverviewCamera(camera);
+      if (mode === 'free') {
+        // 進入自由相機時把軌道中心對到場地中心，否則會繞著上一個 target 轉。
+        orbit.target.set(0, 0, 0);
+        orbit.update();
+      }
     },
     onSpeed: (speed) => {
       player?.setSpeed(speed);
@@ -142,11 +183,35 @@ const controls = new Controls(
       overlay.setShowValues(enabled);
       if (!enabled) overlay.clear();
     },
+    onQuality: (level: QualityLevel) => {
+      quality = resolveQuality(level);
+      applyQuality(renderer, scene, quality);
+      resize();
+    },
     resolveSample: (name) => SAMPLES.get(name),
   },
   [...SAMPLES.keys()].sort(),
 );
+// 控制列是 #app 的子元素而非 .viewport 的：桌機與橫向時它絕對定位浮在 3D 視圖底部，
+// 直向時 CSS 把它改回 static、成為版面的第二列。無論哪一種，它都不在可收合的面板裡，
+// 因此收起面板不會帶走播放控制（§2「不得有按鈕被截掉」）。
+app.append(controls.transport);
 app.append(controls.root);
+
+// 橫向浮層的開關（§3）。桌機與直向由 CSS 隱藏，這裡不必判斷裝置。
+const panelToggle = document.createElement('button');
+panelToggle.type = 'button';
+panelToggle.className = 'panel-toggle';
+panelToggle.textContent = '選項';
+panelToggle.setAttribute('aria-label', '開關控制面板');
+panelToggle.addEventListener('click', () => {
+  const open = app.classList.toggle('panel-open');
+  panelToggle.textContent = open ? '關閉' : '選項';
+  // 浮層讓出寬度後 3D 視圖尺寸不變（浮層是絕對定位），但控制列會位移，
+  // 下一幀重算一次以免時間軸的氣泡位置對不上。
+  requestAnimationFrame(resize);
+});
+viewport.append(panelToggle);
 
 // UI 的初始勾選狀態要與疊圖實際狀態一致，否則第一次切換會反向。
 for (const [feature, on] of Object.entries(controls.initialOverlayState())) {
@@ -177,6 +242,7 @@ async function run(input: BattleInput): Promise<void> {
 function attach(trajectory: Trajectory, generationMs: number): void {
   player = new TrajectoryPlayer(trajectory);
   wheelSpin = 0;
+  lastGenerationMs = generationMs;
   controls.setStatus(
     `${String(trajectory.frameCount)} 幀，產生耗時 ${generationMs.toFixed(0)} ms` +
       `（physicsVersion ${String(trajectory.meta.physicsVersion)}）`,
@@ -191,11 +257,26 @@ function attach(trajectory: Trajectory, generationMs: number): void {
 // ── 繪製迴圈 ────────────────────────────────────────────────────────────
 
 let previousTime = 0;
+let fpsFrames = 0;
+let fpsSince = 0;
+let fps = 0;
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const deltaSeconds = previousTime === 0 ? 0 : (now - previousTime) / 1000;
   previousTime = now;
+
+  // 每 500 ms 更新一次讀數；每幀更新會讓數字跳到讀不出來。
+  fpsFrames += 1;
+  if (fpsSince === 0) fpsSince = now;
+  if (now - fpsSince >= 500) {
+    fps = (fpsFrames * 1000) / (now - fpsSince);
+    fpsFrames = 0;
+    fpsSince = now;
+    hud.textContent =
+      `${fps.toFixed(0)} fps · ${quality.resolved} · ` +
+      `${String(Math.round(renderer.getPixelRatio() * 100) / 100)}x`;
+  }
 
   if (player !== null) {
     const wasPlaying = player.isPlaying;
@@ -247,6 +328,38 @@ function updateCamera(deltaSeconds: number): void {
   camera.position.lerp(followDesired, t);
   camera.lookAt(followTarget);
 }
+
+/**
+ * 量測用的掛勾（§6 驗收）。
+ *
+ * 只讀取已經算好的數字，不改變任何行為 —— 存在的理由是自動化量測需要一個
+ * 穩定的取值點，而不是去解析 HUD 的文字。
+ */
+declare global {
+  interface Window {
+    __player?: {
+      fps: () => number;
+      quality: () => string;
+      pixelRatio: () => number;
+      generationMs: () => number;
+      frameCount: () => number;
+      isPlaying: () => boolean;
+      run: (name: string) => Promise<void>;
+    };
+  }
+}
+window.__player = {
+  fps: () => fps,
+  quality: () => quality.resolved,
+  pixelRatio: () => renderer.getPixelRatio(),
+  generationMs: () => lastGenerationMs,
+  frameCount: () => player?.trajectory.frameCount ?? 0,
+  isPlaying: () => player?.isPlaying ?? false,
+  run: async (name: string) => {
+    const input = SAMPLES.get(name);
+    if (input !== undefined) await run(input);
+  },
+};
 
 await initPhysics();
 requestAnimationFrame(frame);

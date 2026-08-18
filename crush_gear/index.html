@@ -2,7 +2,18 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      行動裝置適配（Phase 1-e）。
+
+      viewport-fit=cover + env(safe-area-inset-*) 讓瀏海機的橫向不會把控制列切掉；
+      user-scalable=no 只擋掉雙指縮放整頁，播放區內的雙指縮放由 OrbitControls 自行處理。
+      注意：這不影響瀏覽器的字級無障礙設定，只影響 pinch-zoom。
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="theme-color" content="#11141a" />
     <title>超激力戰鬥車 — Replay 播放器</title>
     <style>
       :root {
@@ -13,6 +24,12 @@
         --text: #dbe2ee;
         --muted: #8b95a8;
         --accent: #4fa3ff;
+        --sunken: #0d1016;
+        /* 觸控目標下限（§1）。所有可點擊元素不得小於此值。 */
+        --touch: 44px;
+        --safe-b: env(safe-area-inset-bottom, 0px);
+        --safe-r: env(safe-area-inset-right, 0px);
+        --safe-l: env(safe-area-inset-left, 0px);
       }
       * {
         box-sizing: border-box;
@@ -21,33 +38,56 @@
       body {
         margin: 0;
         height: 100%;
+        overflow: hidden;
         background: var(--bg);
         color: var(--text);
         font: 13px/1.5 system-ui, "Noto Sans TC", sans-serif;
+        /* 全域擋掉頁面層級的捲動與縮放；需要捲動的區塊自行開啟（§1）。 */
+        overscroll-behavior: none;
+        -webkit-text-size-adjust: 100%;
       }
+
+      /* ── 版面（§3） ──────────────────────────────────────────────────
+         桌機：3D 視圖 + 右側固定面板。
+         直向手機：3D 視圖在上、控制項在下且可捲動。
+         橫向手機：3D 視圖最大化，控制項收為可摺疊浮層。
+         三者共用同一份 DOM，只由 CSS 切換。 */
       #app {
+        position: relative;
         display: grid;
-        grid-template-columns: 1fr 300px;
-        height: 100%;
+        grid-template-columns: 1fr 320px;
+        height: 100dvh;
       }
       .viewport {
         position: relative;
         min-width: 0;
+        min-height: 0;
+        /* 播放區不得觸發瀏覽器的捲動與縮放（§1）。 */
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
       }
       .viewport canvas {
         display: block;
         width: 100%;
         height: 100%;
+        touch-action: none;
       }
       .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
         padding: 14px;
+        padding-bottom: calc(14px + var(--safe-b));
         background: var(--panel);
         border-left: 1px solid var(--line);
       }
-      .section {
-        margin-bottom: 18px;
-      }
+
+      /* ── 通用元件 ───────────────────────────────────────────────────── */
       h2 {
         margin: 0 0 8px;
         font-size: 12px;
@@ -59,7 +99,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 5px;
+        margin-bottom: 6px;
       }
       .row label {
         flex: 0 0 74px;
@@ -70,12 +110,14 @@
       select {
         flex: 1;
         min-width: 0;
-        padding: 4px 6px;
-        background: #0d1016;
+        min-height: var(--touch);
+        padding: 6px 10px;
+        background: var(--sunken);
         border: 1px solid var(--line);
-        border-radius: 4px;
+        border-radius: 6px;
         color: var(--text);
-        font: inherit;
+        /* 16px 以下 iOS Safari 會在聚焦時自動放大整頁。 */
+        font: 16px/1.4 inherit;
       }
       .car-group {
         margin: 10px 0;
@@ -88,21 +130,32 @@
         color: var(--accent);
         font-weight: 600;
       }
-      .buttons {
-        flex-wrap: wrap;
-      }
       button {
-        flex: 1;
-        padding: 6px 10px;
+        min-height: var(--touch);
+        min-width: var(--touch);
+        padding: 6px 12px;
         background: #232936;
         border: 1px solid var(--line);
-        border-radius: 4px;
+        border-radius: 8px;
         color: var(--text);
         font: inherit;
         cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
       }
-      button:hover {
+      /* hover 僅在真的支援 hover 的裝置上生效；觸控裝置改用 :active（§1）。 */
+      @media (hover: hover) {
+        button:hover {
+          border-color: var(--accent);
+        }
+      }
+      button:active {
+        background: #2c3444;
         border-color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       button.primary {
         background: var(--accent);
@@ -110,32 +163,227 @@
         color: #08121e;
         font-weight: 600;
       }
-      .timeline {
-        width: 100%;
-        margin: 8px 0 2px;
-        padding: 0;
-        accent-color: var(--accent);
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
       }
-      .readout {
-        margin-bottom: 8px;
-        color: var(--muted);
+      .buttons > button {
+        flex: 1 1 auto;
+      }
+
+      /* 分段按鈕：取代下拉選單（§2 速度切換、相機、品質） */
+      .segmented {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .segmented > button {
+        flex: 1 1 0;
+        padding: 6px 4px;
         font-variant-numeric: tabular-nums;
-        font-size: 12px;
       }
+      .segmented > button[aria-pressed="true"] {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #08121e;
+        font-weight: 600;
+      }
+
+      /* 可收合面板：疊圖開關與手動輸入預設收合（§3） */
+      details.fold {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.15);
+      }
+      details.fold > summary {
+        display: flex;
+        align-items: center;
+        min-height: var(--touch);
+        padding: 0 12px;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        cursor: pointer;
+        list-style: none;
+        touch-action: manipulation;
+      }
+      details.fold > summary::-webkit-details-marker {
+        display: none;
+      }
+      details.fold > summary::before {
+        content: "▸";
+        margin-right: 8px;
+        color: var(--accent);
+      }
+      details.fold[open] > summary::before {
+        content: "▾";
+      }
+      details.fold > .fold-body {
+        padding: 4px 12px 12px;
+      }
+
       .checkrow {
         display: flex;
         align-items: center;
-        gap: 7px;
-        margin-bottom: 3px;
+        gap: 10px;
+        min-height: var(--touch);
         cursor: pointer;
         user-select: none;
+        touch-action: manipulation;
       }
       .checkrow input {
         flex: 0 0 auto;
-        width: auto;
+        min-height: 0;
+        width: 22px;
+        height: 22px;
+        padding: 0;
         accent-color: var(--accent);
       }
-      /* 疊圖的浮動數值標籤：投影到 3D 座標上，不攔截滑鼠 */
+
+      /* ── 播放控制列（§2） ──────────────────────────────────────────────
+         永遠浮在 3D 視圖底部，直向與橫向都完整可見，不隨面板收合而消失。 */
+      .transport {
+        position: absolute;
+        left: 0;
+        right: 320px;
+        bottom: 0;
+        z-index: 3;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px 12px calc(10px + var(--safe-b));
+        padding-left: calc(12px + var(--safe-l));
+        padding-right: calc(12px + var(--safe-r));
+        background: linear-gradient(to top, rgba(9, 12, 18, 0.94), rgba(9, 12, 18, 0.72) 70%, transparent);
+        touch-action: none;
+      }
+      .scrub-wrap {
+        position: relative;
+        /* 拖曳氣泡在滑桿上方 42px 處，手指不會遮住（§2）。 */
+        padding-top: 4px;
+      }
+      .timeline {
+        display: block;
+        width: 100%;
+        height: var(--touch);
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        border: none;
+        accent-color: var(--accent);
+        touch-action: none;
+      }
+      .timeline:disabled {
+        opacity: 0.35;
+      }
+      /* 加粗軌道與拇指，讓手指抓得住 */
+      .timeline::-webkit-slider-runnable-track {
+        height: 8px;
+        border-radius: 4px;
+        background: #39415442;
+        background-image: linear-gradient(var(--accent), var(--accent));
+        background-repeat: no-repeat;
+        background-size: var(--fill, 0%) 100%;
+      }
+      .timeline::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 26px;
+        height: 26px;
+        margin-top: -9px;
+        border: 2px solid #08121e;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .timeline::-moz-range-track {
+        height: 8px;
+        border-radius: 4px;
+        background: #39415442;
+      }
+      .timeline::-moz-range-progress {
+        height: 8px;
+        border-radius: 4px;
+        background: var(--accent);
+      }
+      .timeline::-moz-range-thumb {
+        width: 26px;
+        height: 26px;
+        border: 2px solid #08121e;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      /* 拖曳中的幀號氣泡：位於滑桿上方，絕不被手指遮住 */
+      .scrub-bubble {
+        position: absolute;
+        bottom: calc(var(--touch) + 6px);
+        transform: translateX(-50%);
+        padding: 6px 12px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: #08121e;
+        color: var(--text);
+        font: 600 15px/1.2 ui-monospace, "Cascadia Mono", monospace;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.12s;
+      }
+      .scrub-bubble.on {
+        opacity: 1;
+      }
+      .transport-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .transport-row > button {
+        flex: 1 1 0;
+        padding: 6px 2px;
+        background: rgba(35, 41, 54, 0.92);
+      }
+      .transport-row > button.play {
+        flex: 1.4 1 0;
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #08121e;
+        font-weight: 700;
+      }
+      .readout {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+        text-align: center;
+      }
+
+      /* ── 面板開關（橫向浮層用） ────────────────────────────────────── */
+      .panel-toggle {
+        position: absolute;
+        top: calc(10px + env(safe-area-inset-top, 0px));
+        right: calc(10px + var(--safe-r));
+        z-index: 4;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 0 14px;
+        background: rgba(25, 29, 38, 0.92);
+      }
+      .hud {
+        position: absolute;
+        top: calc(10px + env(safe-area-inset-top, 0px));
+        left: calc(10px + var(--safe-l));
+        z-index: 2;
+        padding: 4px 9px;
+        border-radius: 6px;
+        background: rgba(9, 12, 18, 0.66);
+        color: var(--muted);
+        font: 11px/1.4 ui-monospace, "Cascadia Mono", monospace;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+      }
+
+      /* 疊圖的浮動數值標籤：投影到 3D 座標上，不攔截指標 */
       .label-layer {
         position: absolute;
         inset: 0;
@@ -163,15 +411,81 @@
         color: #ffd0a0;
       }
       .status {
-        margin-top: 10px;
         color: var(--muted);
         font-size: 12px;
       }
       .outcome {
         margin-top: 4px;
-        font-size: 14px;
+        font-size: 15px;
         font-weight: 600;
         color: var(--accent);
+      }
+
+      /* ── 直向手機（§3）：3D 在上，控制項在下且可捲動 ───────────────── */
+      @media (max-width: 899px) and (orientation: portrait) {
+        #app {
+          grid-template-columns: 1fr;
+          /* 3D / 控制列 / 其餘控制項。控制列取 auto —— 它的高度是內容決定的，
+             硬給比例會在小螢幕上把按鈕壓扁到 44 px 以下。 */
+          grid-template-rows: minmax(200px, 1fr) auto minmax(0, 1fr);
+        }
+        .transport {
+          position: static;
+          right: auto;
+          background: var(--panel);
+          border-top: 1px solid var(--line);
+          padding-bottom: 10px;
+        }
+        .panel {
+          border-left: none;
+          border-top: 1px solid var(--line);
+        }
+      }
+
+      /* ── 橫向手機（§3）：3D 最大化，控制項為浮層 ─────────────────────
+         以高度而非寬度判斷 —— 決定控制項是否放得下的是可用高度。 */
+      @media (max-height: 560px) and (orientation: landscape) {
+        #app {
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr;
+        }
+        .panel-toggle {
+          display: flex;
+        }
+        .panel {
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 5;
+          width: min(380px, 78vw);
+          border-left: 1px solid var(--line);
+          box-shadow: -12px 0 28px rgba(0, 0, 0, 0.45);
+          transform: translateX(101%);
+          transition: transform 0.18s ease-out;
+          padding-top: calc(14px + env(safe-area-inset-top, 0px));
+        }
+        #app.panel-open .panel {
+          transform: none;
+        }
+        .transport {
+          right: 0;
+        }
+        /* 浮層打開時控制列讓位，避免兩者重疊 */
+        #app.panel-open .transport {
+          right: min(380px, 78vw);
+        }
+        /* 面板的 z-index 高於開關，開著時必須把開關移到面板左側，否則關不掉 */
+        #app.panel-open .panel-toggle {
+          right: calc(min(380px, 78vw) + 10px + var(--safe-r));
+        }
+      }
+
+      /* 桌機不需要浮層開關 */
+      @media (min-width: 900px) and (min-height: 561px) {
+        .panel-toggle {
+          display: none;
+        }
       }
     </style>
   </head>

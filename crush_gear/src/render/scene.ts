@@ -68,8 +68,12 @@ function toGroundPlane(object: THREE.Object3D, height: number): void {
  *   2. stadium 形的比賽區表面，標示圍欄內緣所圍出的範圍
  *   3. 26 段圍欄，位置與旋轉直接取自物理世界的建構函式
  * 另加一圈出界門檻線，讓 §8.1 的判定邊界看得見。
+ *
+ * curveSegments 是**純渲染**參數（Phase 1-e §4）：只影響 stadium 表面與出界環的折線
+ * 段數，不影響任何幾何尺寸，更不影響物理 —— 圍欄的位置與碰撞形狀仍完全來自
+ * buildFenceSegments()。低階裝置降低它可以少畫幾百個三角形。
  */
-export function buildArena(): THREE.Group {
+export function buildArena(curveSegments: number = ARENA_CURVE_SEGMENTS): THREE.Group {
   const arena = new THREE.Group();
   arena.name = 'arena';
 
@@ -90,7 +94,7 @@ export function buildArena(): THREE.Group {
   // 2. 比賽區表面（純視覺，物理上仍是上面那塊矩形）
   const surfaceShape = stadiumShape(FIELD_RADIUS);
   const surface = new THREE.Mesh(
-    new THREE.ShapeGeometry(surfaceShape, ARENA_CURVE_SEGMENTS),
+    new THREE.ShapeGeometry(surfaceShape, curveSegments),
     new THREE.MeshStandardMaterial({
       color: COLOR_ARENA_SURFACE,
       polygonOffset: true,
@@ -132,9 +136,9 @@ export function buildArena(): THREE.Group {
   // 出界門檻線（§8.1 的 stadiumDistance > OUT_THRESHOLD）
   const ringWidth = FIELD_RADIUS * OUT_RING_WIDTH_FACTOR;
   const outer = stadiumShape(OUT_THRESHOLD + ringWidth);
-  outer.holes.push(new THREE.Path(stadiumShape(OUT_THRESHOLD).getPoints(ARENA_CURVE_SEGMENTS)));
+  outer.holes.push(new THREE.Path(stadiumShape(OUT_THRESHOLD).getPoints(curveSegments)));
   const ring = new THREE.Mesh(
-    new THREE.ShapeGeometry(outer, ARENA_CURVE_SEGMENTS),
+    new THREE.ShapeGeometry(outer, curveSegments),
     new THREE.MeshBasicMaterial({
       color: COLOR_OUT_RING,
       transparent: true,
@@ -161,6 +165,7 @@ export function buildLights(): THREE.Group {
 
   const extent = arenaExtent();
   const key = new THREE.DirectionalLight(0xffffff, KEY_LIGHT_INTENSITY);
+  key.name = 'key-light';
   key.position.set(extent, extent * 2, extent);
   key.castShadow = true;
   key.shadow.camera.left = -extent;
@@ -178,10 +183,10 @@ export function buildLights(): THREE.Group {
   return lights;
 }
 
-export function buildScene(): THREE.Scene {
+export function buildScene(curveSegments: number = ARENA_CURVE_SEGMENTS): THREE.Scene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLOR_BACKGROUND);
-  scene.add(buildArena());
+  scene.add(buildArena(curveSegments));
   scene.add(buildLights());
   return scene;
 }

@@ -3,6 +3,19 @@
  *
  * 以原生 DOM 實作 —— 延續 Phase 0 §1 的禁令，不引入 React 或任何 UI 框架。
  * 這一層只負責蒐集輸入與顯示狀態，不碰 three.js、也不碰模擬。
+ *
+ * ## 行動裝置適配（Phase 1-e）
+ *
+ * 介面分成兩塊、由 `main.ts` 掛到不同容器：
+ *   - `transport`：播放控制列，**永遠浮在 3D 視圖底部**，直向與橫向都完整可見。
+ *     這是「不得有按鈕被截掉」的結構性保證 —— 它不在可收合的面板裡，
+ *     所以面板收起來時它不會跟著消失。
+ *   - `root`：其餘控制項（輸入、相機、品質、疊圖），在直向位於下方、橫向為浮層。
+ *
+ * 觸控相關的三個原則：
+ *   1. 所有可點擊元素 ≥ 44×44 CSS px（`--touch`，於 index.html 定義）。
+ *   2. 不使用下拉選單表達模式切換 —— 一律改為分段按鈕，一次點擊即完成。
+ *   3. 不依賴 hover：原本靠 `title` 提示的按鈕改為直接標示文字。
  */
 
 import { FIELD_HALF_SEGMENT, THROW_LIMITS, THROW_MAX_STADIUM_DISTANCE } from '../data/constants.js';
@@ -14,6 +27,18 @@ import type { BattleInput, ThrowParams } from '../sim/types.js';
 
 export type CameraMode = 'overview' | 'follow-a' | 'follow-b' | 'free';
 
+/** 渲染品質等級（§4）。**只影響渲染，不影響軌跡資料。** */
+export type QualityLevel = 'auto' | 'high' | 'medium' | 'low';
+
+export const QUALITY_LEVELS: readonly QualityLevel[] = ['auto', 'high', 'medium', 'low'];
+
+const QUALITY_LABELS: Record<QualityLevel, string> = {
+  auto: '自動',
+  high: '高',
+  medium: '中',
+  low: '低',
+};
+
 export type ControlsHandlers = {
   onRun: (input: BattleInput) => void;
   onTogglePlay: () => void;
@@ -24,6 +49,7 @@ export type ControlsHandlers = {
   onStep: (delta: number) => void;
   onOverlay: (feature: OverlayFeature, enabled: boolean) => void;
   onShowValues: (enabled: boolean) => void;
+  onQuality: (level: QualityLevel) => void;
   /**
    * 依名稱取得範例輸入。
    *
@@ -43,6 +69,10 @@ const THROW_FIELDS = [
   { key: 'spin', label: 'spin', step: 0.5 },
 ] as const;
 
+/** 逐幀按鈕連點的初始延遲與重複間隔（ms）。 */
+const REPEAT_DELAY = 380;
+const REPEAT_INTERVAL = 70;
+
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -52,6 +82,71 @@ function el<K extends keyof HTMLElementTagNameMap>(
   if (className !== undefined) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+/**
+ * 分段按鈕組，取代 `<select>`（§2）。
+ *
+ * 下拉選單在觸控裝置上要兩次互動（開啟 → 選取）且會蓋住畫面；
+ * 分段按鈕一次點擊即完成，且每個選項都能滿足 44 px 的觸控目標。
+ */
+function segmented<T>(
+  options: readonly { value: T; label: string }[],
+  initial: T,
+  onPick: (value: T) => void,
+): { element: HTMLElement; select: (value: T) => void } {
+  const group = el('div', 'segmented');
+  group.setAttribute('role', 'group');
+  const buttons = new Map<T, HTMLButtonElement>();
+
+  const select = (value: T): void => {
+    for (const [key, button] of buttons) {
+      button.setAttribute('aria-pressed', key === value ? 'true' : 'false');
+    }
+  };
+
+  for (const option of options) {
+    const button = el('button', undefined, option.label);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      select(option.value);
+      onPick(option.value);
+    });
+    buttons.set(option.value, button);
+    group.append(button);
+  }
+  select(initial);
+  return { element: group, select };
+}
+
+/**
+ * 讓按鈕支援按住連發（§2「按鈕夠大可連點」）。
+ *
+ * 用 pointer 事件而非 click：觸控裝置的 click 有 ~300 ms 延遲且無法連發。
+ * `setPointerCapture` 確保手指滑出按鈕範圍時仍收得到 pointerup，不會卡在連發狀態。
+ */
+function repeatable(button: HTMLButtonElement, action: () => void): void {
+  let delayTimer: ReturnType<typeof setTimeout> | undefined;
+  let repeatTimer: ReturnType<typeof setInterval> | undefined;
+
+  const stop = (): void => {
+    if (delayTimer !== undefined) clearTimeout(delayTimer);
+    if (repeatTimer !== undefined) clearInterval(repeatTimer);
+    delayTimer = undefined;
+    repeatTimer = undefined;
+  };
+
+  button.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    button.setPointerCapture(event.pointerId);
+    action();
+    delayTimer = setTimeout(() => {
+      repeatTimer = setInterval(action, REPEAT_INTERVAL);
+    }, REPEAT_DELAY);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
+    button.addEventListener(type, stop);
+  }
 }
 
 /** 在 stadium 內以拒絕取樣產生合法投擲（§P1.8.3、依 Phase 0 §7 的範圍）。 */
@@ -78,7 +173,10 @@ export function randomThrow(rng: Rng): ThrowParams {
 }
 
 export class Controls {
+  /** 其餘控制項；直向在下方、橫向為浮層。 */
   readonly root: HTMLElement;
+  /** 播放控制列；永遠浮在 3D 視圖底部。 */
+  readonly transport: HTMLElement;
 
   private readonly seedInput: HTMLInputElement;
   private readonly throwInputs: Record<'A' | 'B', Map<string, HTMLInputElement>> = {
@@ -91,6 +189,7 @@ export class Controls {
   private readonly playButton: HTMLButtonElement;
   private readonly timeline: HTMLInputElement;
   private readonly frameReadout: HTMLElement;
+  private readonly scrubBubble: HTMLElement;
   private randomCounter = 0;
   /** 使用者正在拖曳時間軸時，暫停由播放迴圈回寫滑桿位置。 */
   private scrubbing = false;
@@ -100,10 +199,209 @@ export class Controls {
     sampleNames: readonly string[],
   ) {
     this.root = el('div', 'panel');
+    this.transport = el('div', 'transport');
 
-    // ── 輸入 ────────────────────────────────────────────────────────────
-    const inputSection = el('section', 'section');
-    inputSection.append(el('h2', undefined, '投擲參數'));
+    // ── 播放控制列（§2）───────────────────────────────────────────────
+    // 時間軸 + 拖曳氣泡
+    const scrubWrap = el('div', 'scrub-wrap');
+    this.timeline = el('input', 'timeline');
+    this.timeline.type = 'range';
+    this.timeline.min = '0';
+    this.timeline.max = '0';
+    this.timeline.step = '1';
+    this.timeline.value = '0';
+    this.timeline.disabled = true;
+    this.timeline.setAttribute('aria-label', '時間軸');
+
+    this.scrubBubble = el('div', 'scrub-bubble', '0');
+    scrubWrap.append(this.scrubBubble, this.timeline);
+
+    const onScrub = (): void => {
+      const frame = Number(this.timeline.value);
+      this.handlers.onSeek(frame);
+      this.paintTimeline(frame);
+      this.scrubBubble.textContent = `${String(frame)} 幀`;
+    };
+    // pointerdown 就顯示氣泡：手指按下的瞬間就要看得到數值，不必等到移動。
+    this.timeline.addEventListener('pointerdown', () => {
+      this.scrubbing = true;
+      this.scrubBubble.classList.add('on');
+      this.scrubBubble.textContent = `${this.timeline.value} 幀`;
+    });
+    for (const type of ['pointerup', 'pointercancel'] as const) {
+      this.timeline.addEventListener(type, () => {
+        this.scrubbing = false;
+        this.scrubBubble.classList.remove('on');
+      });
+    }
+    this.timeline.addEventListener('input', onScrub);
+    this.timeline.addEventListener('change', onScrub);
+    this.transport.append(scrubWrap);
+
+    // 傳輸按鈕：重播、−10、−1、播放、+1、+10
+    const transportRow = el('div', 'transport-row');
+    const restartButton = el('button', undefined, '↺');
+    restartButton.type = 'button';
+    restartButton.setAttribute('aria-label', '重播');
+    restartButton.addEventListener('click', () => {
+      this.handlers.onRestart();
+    });
+
+    const back10 = el('button', undefined, '−10');
+    back10.type = 'button';
+    back10.setAttribute('aria-label', '後退十幀');
+    repeatable(back10, () => {
+      this.handlers.onStep(-10);
+    });
+
+    const back1 = el('button', undefined, '−1');
+    back1.type = 'button';
+    back1.setAttribute('aria-label', '後退一幀');
+    repeatable(back1, () => {
+      this.handlers.onStep(-1);
+    });
+
+    this.playButton = el('button', 'play', '播放');
+    this.playButton.type = 'button';
+    this.playButton.addEventListener('click', () => {
+      this.handlers.onTogglePlay();
+    });
+
+    const fwd1 = el('button', undefined, '+1');
+    fwd1.type = 'button';
+    fwd1.setAttribute('aria-label', '前進一幀');
+    repeatable(fwd1, () => {
+      this.handlers.onStep(1);
+    });
+
+    const fwd10 = el('button', undefined, '+10');
+    fwd10.type = 'button';
+    fwd10.setAttribute('aria-label', '前進十幀');
+    repeatable(fwd10, () => {
+      this.handlers.onStep(10);
+    });
+
+    transportRow.append(restartButton, back10, back1, this.playButton, fwd1, fwd10);
+    this.transport.append(transportRow);
+
+    // 速度：分段按鈕，不用下拉選單（§2）
+    const speedGroup = segmented(
+      PLAYBACK_SPEEDS.map((speed) => ({ value: speed as number, label: `${String(speed)}×` })),
+      1,
+      (speed) => {
+        this.handlers.onSpeed(speed);
+      },
+    );
+    this.transport.append(speedGroup.element);
+
+    this.frameReadout = el('div', 'readout', '— / —');
+    this.transport.append(this.frameReadout);
+
+    // ── 主要入口（§3：手機上以載入範例／隨機產生為主）───────────────
+    const actions = el('section');
+    actions.append(el('h2', undefined, '場次'));
+
+    const sampleRow = el('div', 'row');
+    sampleRow.append(el('label', undefined, '範例'));
+    this.sampleSelect = el('select');
+    this.sampleSelect.setAttribute('aria-label', '範例場次');
+    for (const name of sampleNames) {
+      const option = el('option');
+      option.value = name;
+      option.textContent = name;
+      this.sampleSelect.append(option);
+    }
+    // 選到就直接載入 —— 手機上少一次點擊。
+    this.sampleSelect.addEventListener('change', () => {
+      this.dispatchSampleLoad();
+    });
+    sampleRow.append(this.sampleSelect);
+    actions.append(sampleRow);
+
+    const buttonRow = el('div', 'buttons');
+    const loadButton = el('button', 'primary', '載入範例');
+    loadButton.type = 'button';
+    loadButton.addEventListener('click', () => {
+      this.dispatchSampleLoad();
+    });
+    const randomButton = el('button', 'primary', '隨機產生');
+    randomButton.type = 'button';
+    randomButton.addEventListener('click', () => {
+      this.randomCounter += 1;
+      const rng = new Rng((this.readSeed() + this.randomCounter) | 0);
+      this.setThrow('A', randomThrow(rng));
+      this.setThrow('B', randomThrow(rng));
+      this.run();
+    });
+    buttonRow.append(loadButton, randomButton);
+    actions.append(buttonRow);
+
+    this.statusLine = el('div', 'status', '尚未產生軌跡');
+    this.outcomeLine = el('div', 'outcome');
+    actions.append(this.statusLine, this.outcomeLine);
+
+    // ── 相機（§P1.8.1）────────────────────────────────────────────────
+    const cameraSection = el('section');
+    cameraSection.append(el('h2', undefined, '相機'));
+    cameraSection.append(
+      segmented<CameraMode>(
+        [
+          { value: 'overview', label: '全景' },
+          { value: 'follow-a', label: '跟隨 A' },
+          { value: 'follow-b', label: '跟隨 B' },
+          { value: 'free', label: '自由' },
+        ],
+        'overview',
+        (mode) => {
+          this.handlers.onCameraMode(mode);
+        },
+      ).element,
+    );
+    const hint = el(
+      'div',
+      'status',
+      '自由相機：單指旋轉、雙指縮放與平移。',
+    );
+    cameraSection.append(hint);
+
+    // ── 畫質（§4）─────────────────────────────────────────────────────
+    const qualitySection = el('section');
+    qualitySection.append(el('h2', undefined, '畫質'));
+    qualitySection.append(
+      segmented<QualityLevel>(
+        QUALITY_LEVELS.map((level) => ({ value: level, label: QUALITY_LABELS[level] })),
+        'auto',
+        (level) => {
+          this.handlers.onQuality(level);
+        },
+      ).element,
+    );
+    qualitySection.append(
+      el('div', 'status', '只影響渲染，不影響軌跡資料與判定結果。'),
+    );
+
+    // ── 除錯疊圖（§P1.8.2）：手機上預設收合（§3）─────────────────────
+    const overlayFold = el('details', 'fold');
+    overlayFold.append(el('summary', undefined, '除錯疊圖'));
+    const overlayBody = el('div', 'fold-body');
+    for (const feature of OVERLAY_FEATURES) {
+      overlayBody.append(
+        this.checkbox(OVERLAY_LABELS[feature], feature === 'wheelGrounded', (on) => {
+          this.handlers.onOverlay(feature, on);
+        }),
+      );
+    }
+    overlayBody.append(
+      this.checkbox('顯示數值（N / F）', false, (on) => {
+        this.handlers.onShowValues(on);
+      }),
+    );
+    overlayFold.append(overlayBody);
+
+    // ── 手動輸入（§3：放在展開區）────────────────────────────────────
+    const inputFold = el('details', 'fold');
+    inputFold.append(el('summary', undefined, '手動輸入投擲參數'));
+    const inputBody = el('div', 'fold-body');
 
     const seedRow = el('div', 'row');
     seedRow.append(el('label', undefined, 'seed'));
@@ -111,8 +409,9 @@ export class Controls {
     this.seedInput.type = 'number';
     this.seedInput.step = '1';
     this.seedInput.value = '20260817';
+    this.seedInput.inputMode = 'numeric';
     seedRow.append(this.seedInput);
-    inputSection.append(seedRow);
+    inputBody.append(seedRow);
 
     for (const car of ['A', 'B'] as const) {
       const group = el('fieldset', 'car-group');
@@ -124,158 +423,25 @@ export class Controls {
         input.type = 'number';
         input.step = String(field.step);
         input.value = '0';
+        input.inputMode = 'decimal';
         row.append(input);
         group.append(row);
         this.throwInputs[car].set(field.key, input);
       }
-      inputSection.append(group);
+      inputBody.append(group);
     }
 
-    // ── 動作 ────────────────────────────────────────────────────────────
-    const actions = el('section', 'section');
-
-    const sampleRow = el('div', 'row');
-    sampleRow.append(el('label', undefined, '範例'));
-    this.sampleSelect = el('select');
-    for (const name of sampleNames) {
-      const option = el('option');
-      option.value = name;
-      option.textContent = name;
-      this.sampleSelect.append(option);
-    }
-    sampleRow.append(this.sampleSelect);
-    actions.append(sampleRow);
-
-    const buttonRow = el('div', 'row buttons');
-    const loadButton = el('button', undefined, '載入範例');
-    loadButton.addEventListener('click', () => {
-      this.dispatchSampleLoad();
-    });
-    const randomButton = el('button', undefined, '隨機投擲');
-    randomButton.addEventListener('click', () => {
-      this.randomCounter += 1;
-      const rng = new Rng((this.readSeed() + this.randomCounter) | 0);
-      this.setThrow('A', randomThrow(rng));
-      this.setThrow('B', randomThrow(rng));
-      this.run();
-    });
+    const runRow = el('div', 'buttons');
     const runButton = el('button', 'primary', '產生並播放');
+    runButton.type = 'button';
     runButton.addEventListener('click', () => {
       this.run();
     });
-    buttonRow.append(loadButton, randomButton, runButton);
-    actions.append(buttonRow);
+    runRow.append(runButton);
+    inputBody.append(runRow);
+    inputFold.append(inputBody);
 
-    // ── 播放（§P1.8.1） ─────────────────────────────────────────────────
-    const playback = el('section', 'section');
-    playback.append(el('h2', undefined, '播放'));
-
-    const transportRow = el('div', 'row buttons');
-    const stepBack = el('button', undefined, '◀ 幀');
-    stepBack.title = '後退一幀';
-    stepBack.addEventListener('click', () => {
-      this.handlers.onStep(-1);
-    });
-    this.playButton = el('button', undefined, '播放');
-    this.playButton.addEventListener('click', () => {
-      this.handlers.onTogglePlay();
-    });
-    const stepForward = el('button', undefined, '幀 ▶');
-    stepForward.title = '前進一幀';
-    stepForward.addEventListener('click', () => {
-      this.handlers.onStep(1);
-    });
-    const restartButton = el('button', undefined, '重播');
-    restartButton.addEventListener('click', () => {
-      this.handlers.onRestart();
-    });
-    transportRow.append(stepBack, this.playButton, stepForward, restartButton);
-    playback.append(transportRow);
-
-    // 時間軸
-    this.timeline = el('input', 'timeline');
-    this.timeline.type = 'range';
-    this.timeline.min = '0';
-    this.timeline.max = '0';
-    this.timeline.step = '1';
-    this.timeline.value = '0';
-    this.timeline.disabled = true;
-    const onScrub = (): void => {
-      this.handlers.onSeek(Number(this.timeline.value));
-    };
-    this.timeline.addEventListener('pointerdown', () => {
-      this.scrubbing = true;
-    });
-    this.timeline.addEventListener('pointerup', () => {
-      this.scrubbing = false;
-    });
-    this.timeline.addEventListener('input', onScrub);
-    this.timeline.addEventListener('change', onScrub);
-    playback.append(this.timeline);
-
-    this.frameReadout = el('div', 'readout', '— / —');
-    playback.append(this.frameReadout);
-
-    // 速度
-    const speedRow = el('div', 'row');
-    speedRow.append(el('label', undefined, '速度'));
-    const speedSelect = el('select');
-    for (const speed of PLAYBACK_SPEEDS) {
-      const option = el('option');
-      option.value = String(speed);
-      option.textContent = `${String(speed)}×`;
-      if (speed === 1) option.selected = true;
-      speedSelect.append(option);
-    }
-    speedSelect.addEventListener('change', () => {
-      this.handlers.onSpeed(Number(speedSelect.value));
-    });
-    speedRow.append(speedSelect);
-    playback.append(speedRow);
-
-    // 相機
-    const cameraRow = el('div', 'row');
-    cameraRow.append(el('label', undefined, '相機'));
-    const cameraSelect = el('select');
-    for (const [value, label] of [
-      ['overview', '全景'],
-      ['follow-a', '跟隨 A'],
-      ['follow-b', '跟隨 B'],
-      ['free', '自由'],
-    ] as const) {
-      const option = el('option');
-      option.value = value;
-      option.textContent = label;
-      cameraSelect.append(option);
-    }
-    cameraSelect.addEventListener('change', () => {
-      this.handlers.onCameraMode(cameraSelect.value as CameraMode);
-    });
-    cameraRow.append(cameraSelect);
-    playback.append(cameraRow);
-
-    this.statusLine = el('div', 'status', '尚未產生軌跡');
-    this.outcomeLine = el('div', 'outcome');
-    playback.append(this.statusLine, this.outcomeLine);
-
-    // ── 除錯疊圖（§P1.8.2） ─────────────────────────────────────────────
-    const overlaySection = el('section', 'section');
-    overlaySection.append(el('h2', undefined, '除錯疊圖'));
-    for (const feature of OVERLAY_FEATURES) {
-      overlaySection.append(
-        this.checkbox(OVERLAY_LABELS[feature], feature === 'wheelGrounded', (on) => {
-          this.handlers.onOverlay(feature, on);
-        }),
-      );
-    }
-    overlaySection.append(
-      this.checkbox('顯示數值（N / F）', false, (on) => {
-        this.handlers.onShowValues(on);
-      }),
-    );
-    playback.append(overlaySection);
-
-    this.root.append(inputSection, actions, playback);
+    this.root.append(actions, cameraSection, qualitySection, overlayFold, inputFold);
   }
 
   private checkbox(label: string, initial: boolean, onChange: (on: boolean) => void): HTMLElement {
@@ -339,16 +505,37 @@ export class Controls {
     this.timeline.max = String(lastFrame);
     this.timeline.value = '0';
     this.timeline.disabled = lastFrame <= 0;
+    this.paintTimeline(0);
   }
 
   /** 每幀回寫目前位置；使用者正在拖曳時不覆寫滑桿。 */
   setPlayhead(frame: number, lastFrame: number, seconds: number): void {
-    if (!this.scrubbing) this.timeline.value = String(frame);
+    if (!this.scrubbing) {
+      this.timeline.value = String(frame);
+      this.paintTimeline(frame);
+    }
     this.frameReadout.textContent =
       `${String(frame)} / ${String(lastFrame)} 幀 · ${seconds.toFixed(2)} 秒`;
   }
 
   // ── 內部 ──────────────────────────────────────────────────────────────
+
+  /**
+   * 更新滑桿的已播進度與氣泡位置。
+   *
+   * WebKit 的 `::-webkit-slider-runnable-track` 沒有 `::-moz-range-progress` 的對應物，
+   * 只能以 CSS 變數餵一段 background-size 進去；氣泡的水平位置也在這裡一併算，
+   * 兩者用同一個比例才不會分家。拇指有寬度，故兩端各內縮半個拇指。
+   */
+  private paintTimeline(frame: number): void {
+    const max = Number(this.timeline.max);
+    const ratio = max <= 0 ? 0 : Math.min(1, Math.max(0, frame / max));
+    this.timeline.style.setProperty('--fill', `${String(ratio * 100)}%`);
+    const thumb = 26;
+    const width = this.timeline.clientWidth;
+    const usable = Math.max(0, width - thumb);
+    this.scrubBubble.style.left = `${String(thumb / 2 + ratio * usable)}px`;
+  }
 
   private dispatchSampleLoad(): void {
     const name = this.sampleSelect.value;

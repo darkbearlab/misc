@@ -1,0 +1,67 @@
+name: crush_gear replay player — GitHub Pages
+
+# Phase 1-e §5 —— 把 replay 播放器建置並部署到 GitHub Pages，讓設計方能用手機開啟。
+#
+# ⚠️ 這份是**專案內的參考副本**。GitHub Actions 只讀取 repo 根目錄的 .github/workflows/，
+# 子目錄裡的 workflow 不會執行。實際生效的是根目錄的 crush-gear-pages.yml，
+# 兩者的差異只有 paths 前綴與 defaults.run.working-directory。
+#
+# ## base path
+#
+# Pages 把 repo `misc` 的站台掛在 https://<owner>.github.io/misc/ 底下，
+# 因此所有資產的 URL 必須以 /misc/ 開頭。Vite 預設 base 是 `/`，
+# 直接部署會讓 index.html 去要 /assets/... 而 404 —— 站台看起來是一片空白。
+# 這裡以 `--base` 指定，不改 vite.config.ts（本階段的絕對約束只允許動渲染層）。
+#
+# base 由 repo 名稱推導而非寫死，fork 或改名都不會壞掉。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'package-lock.json'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時只允許一個部署；新的 push 取消進行中的舊部署。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # npm ci 而非 npm install：lock file 決定裝到哪一個 wasm binary。
+      - run: npm ci
+
+      - name: Build
+        run: npm run build -- --base=/${{ github.event.repository.name }}/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
