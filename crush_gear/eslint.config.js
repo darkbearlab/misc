@@ -248,6 +248,20 @@ export default tseslint.config(
 
   {
     /**
+     * §3 禁令 1(禁止 Math.random)只約束 src/sim/ —— 它保護的是**模擬**的決定性。
+     *
+     * UI 層產生「一組新的投擲參數」是使用者輸入的來源,不是模擬過程:
+     * 隨機的是輸入,模擬本身收到那組參數後仍完全決定性
+     * (tests/random-throw.test.ts 驗證同一組 seed 重播結果相同)。
+     * 設計方 2026-08-18 明文裁決此範圍。
+     */
+    files: ['src/ui/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
+    },
+  },
+  {
+    /**
      * `src/replay/` 是 sim 之上、render 之下的一層：
      * 組裝 TrajectoryMeta（需要牆上時間）與判斷 replay 的相容性。
      * 它不做 I/O、不碰瀏覽器 API，因此 tools/ 與 render/ 都能使用。

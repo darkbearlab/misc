@@ -3,29 +3,27 @@
  *
  * 底盤、前武器、輪位全部由 `src/data/constants.ts` 衍生 ——
  * 底盤 box 用的是 Rapier 那顆 cuboid collider 的 half-extents 與位移，
- * 前武器則是對 `WEAPON_HULL` 這組**同一份頂點**取凸包。
+ * 每個部件都對 `ResolvedVehicle.parts` 的**同一份資料**建幾何。
  * 看到的車與實際碰撞的車因此必然同形。
  */
 
 import * as THREE from 'three';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 
-import {
-  CHASSIS_HALF_EXTENTS,
-  CHASSIS_OFFSET,
-  SUSPENSION_REST_LENGTH,
-  WEAPON_HULL,
-  WHEEL_ANCHORS,
-} from '../data/constants.js';
+import { SUSPENSION_REST_LENGTH } from '../data/constants.js';
+import { DEFAULT_VEHICLE, type ResolvedVehicle } from '../sim/vehicle-shape.js';
+
 import {
   COLOR_WEAPON,
   COLOR_WHEEL,
   COLOR_WHEEL_AIRBORNE,
+  COLOR_WHEEL_WEAPON,
+  SHELL_OPACITY,
   WEAPON_METALNESS,
   WEAPON_ROUGHNESS,
+  WHEEL_WIDTH_FACTOR,
   WHEEL_SEGMENTS,
   WHEEL_VISUAL_RADIUS,
-  WHEEL_VISUAL_WIDTH,
 } from './visual.js';
 
 export type VehicleView = {
@@ -35,6 +33,10 @@ export type VehicleView = {
   wheels: THREE.Mesh[];
   chassis: THREE.Mesh;
   weapon: THREE.Mesh;
+  /** 全部部件的 mesh，順序與 shape.parts 相同。 */
+  parts: THREE.Mesh[];
+  /** 本車的解析後幾何；updateWheels 需要錨點高度。 */
+  shape: ResolvedVehicle;
 };
 
 const GROUNDED_MATERIAL = new THREE.MeshStandardMaterial({ color: COLOR_WHEEL });
@@ -43,49 +45,76 @@ const AIRBORNE_MATERIAL = new THREE.MeshStandardMaterial({ color: COLOR_WHEEL_AI
 /**
  * 建立一台車的 mesh 樹。
  *
- * @param bodyColor 車體顏色（純視覺，用來區分 A / B）
+ * **所有幾何都由 `ResolvedVehicle` 衍生**(§P1.7.1)—— 與 Rapier 建立 collider 時
+ * 讀的是同一份 `parts`,因此「看到的車」與「實際碰撞的車」不可能不同步。
+ * 第五輪的六件式車體(底盤、外殼、前武器、後武器、輪武器 ×2)全部會被畫出來;
+ * 新增部件不需要改這裡,加進 `parts` 就會自動出現。
+ *
+ * @param bodyColor 車體顏色(純視覺,用來區分 A / B)
+ * @param shape     要繪製的車體。省略時為 v1 的凍結車體。
  */
-export function buildVehicle(bodyColor: number): VehicleView {
+export function buildVehicle(
+  bodyColor: number,
+  shape: ResolvedVehicle = DEFAULT_VEHICLE,
+): VehicleView {
   const root = new THREE.Group();
   root.name = 'vehicle';
 
-  // 底盤：與 Rapier 的 cuboid collider 完全同尺寸同位移
-  const chassis = new THREE.Mesh(
-    new THREE.BoxGeometry(
-      CHASSIS_HALF_EXTENTS.x * 2,
-      CHASSIS_HALF_EXTENTS.y * 2,
-      CHASSIS_HALF_EXTENTS.z * 2,
-    ),
-    new THREE.MeshStandardMaterial({ color: bodyColor }),
-  );
-  chassis.position.set(CHASSIS_OFFSET.x, CHASSIS_OFFSET.y, CHASSIS_OFFSET.z);
-  chassis.name = 'chassis';
-  chassis.castShadow = true;
-  root.add(chassis);
+  const bodyMaterial = new THREE.MeshStandardMaterial({ color: bodyColor });
+  const shellMaterial = new THREE.MeshStandardMaterial({
+    color: bodyColor,
+    transparent: true,
+    opacity: SHELL_OPACITY,
+  });
+  const weaponMaterial = new THREE.MeshStandardMaterial({
+    color: COLOR_WEAPON,
+    metalness: WEAPON_METALNESS,
+    roughness: WEAPON_ROUGHNESS,
+  });
+  const wheelWeaponMaterial = new THREE.MeshStandardMaterial({
+    color: COLOR_WHEEL_WEAPON,
+    metalness: WEAPON_METALNESS,
+    roughness: WEAPON_ROUGHNESS,
+  });
 
-  // 前武器：對 WEAPON_HULL 取凸包，與 Rapier 的 convexHull collider 同一組頂點
-  const weapon = new THREE.Mesh(
-    new ConvexGeometry(WEAPON_HULL.map((p) => new THREE.Vector3(p[0], p[1], p[2]))),
-    new THREE.MeshStandardMaterial({
-      color: COLOR_WEAPON,
-      metalness: WEAPON_METALNESS,
-      roughness: WEAPON_ROUGHNESS,
-    }),
-  );
-  weapon.name = 'weapon';
-  weapon.castShadow = true;
-  root.add(weapon);
+  /** 部件的材質分派。外殼半透明,否則它會把底盤與輪武器整個蓋住看不到。 */
+  const materialFor = (name: string): THREE.MeshStandardMaterial => {
+    if (name === 'shell') return shellMaterial;
+    if (name.startsWith('wheel-weapon')) return wheelWeaponMaterial;
+    if (name.endsWith('weapon')) return weaponMaterial;
+    return bodyMaterial;
+  };
+
+  const meshes: THREE.Mesh[] = [];
+  for (const part of shape.parts) {
+    const geometry =
+      part.kind === 'cuboid'
+        ? new THREE.BoxGeometry(
+            part.halfExtents.x * 2,
+            part.halfExtents.y * 2,
+            part.halfExtents.z * 2,
+          )
+        : new ConvexGeometry(part.points.map((p) => new THREE.Vector3(p[0], p[1], p[2])));
+    const mesh = new THREE.Mesh(geometry, materialFor(part.name));
+    if (part.kind === 'cuboid') {
+      mesh.position.set(part.offset.x, part.offset.y, part.offset.z);
+    }
+    mesh.name = part.name;
+    mesh.castShadow = true;
+    meshes.push(mesh);
+    root.add(mesh);
+  }
 
   // 輪子：物理上不是剛體，這裡純粹是視覺表現（§P1.7.2）
   const wheelGeometry = new THREE.CylinderGeometry(
     WHEEL_VISUAL_RADIUS,
     WHEEL_VISUAL_RADIUS,
-    WHEEL_VISUAL_WIDTH,
+    shape.trackWidth * WHEEL_WIDTH_FACTOR,
     WHEEL_SEGMENTS,
   );
   const wheels: THREE.Mesh[] = [];
-  for (let i = 0; i < WHEEL_ANCHORS.length; i += 1) {
-    const anchor = WHEEL_ANCHORS[i] as readonly [number, number, number];
+  for (let i = 0; i < shape.wheelAnchors.length; i += 1) {
+    const anchor = shape.wheelAnchors[i] as readonly [number, number, number];
     const wheel = new THREE.Mesh(wheelGeometry, GROUNDED_MATERIAL);
     // 圓柱預設軸向為 +Y，轉成沿車體 X 軸（左右）
     wheel.rotation.z = Math.PI / 2;
@@ -96,7 +125,10 @@ export function buildVehicle(bodyColor: number): VehicleView {
     root.add(wheel);
   }
 
-  return { root, wheels, chassis, weapon };
+  // chassis / weapon 保留為第一、第二個部件的別名，維持既有呼叫端與測試。
+  const chassis = meshes[0] as THREE.Mesh;
+  const weapon = (meshes.find((m) => m.name === 'front-weapon') ?? meshes[1] ?? chassis);
+  return { root, wheels, chassis, weapon, parts: meshes, shape };
 }
 
 /**
@@ -114,7 +146,7 @@ export function updateWheels(
 ): void {
   for (let i = 0; i < view.wheels.length; i += 1) {
     const wheel = view.wheels[i] as THREE.Mesh;
-    const anchor = WHEEL_ANCHORS[i] as readonly [number, number, number];
+    const anchor = view.shape.wheelAnchors[i] as readonly [number, number, number];
     const distance = suspensionDistance[i];
     const grounded = distance !== null && distance !== undefined;
     const d = grounded ? distance : SUSPENSION_REST_LENGTH;

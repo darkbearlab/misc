@@ -23,6 +23,8 @@ import type { Trajectory } from '../replay/trajectory.js';
 import { initPhysics } from '../sim/world.js';
 import type { BattleInput } from '../sim/types.js';
 import { Controls, type CameraMode, type QualityLevel } from '../ui/controls.js';
+import { PLAYER_PRESETS, type PlayerPreset } from '../ui/presets.js';
+import { resolveVehicle } from '../sim/vehicle-shape.js';
 import {
   applyOverviewCamera,
   arenaExtent,
@@ -46,16 +48,35 @@ import {
 
 type SampleFile = { seed: number; throwA: BattleInput['throwA']; throwB: BattleInput['throwB'] };
 
-const sampleModules = import.meta.glob<SampleFile>('../../sample_battles/*.json', {
+// 範例依 preset 分目錄：v1 用根目錄的，探索用的車體用 official/。
+const sampleModules = import.meta.glob<SampleFile>('../../sample_battles/**/*.json', {
   eager: true,
 });
 
-const SAMPLES = new Map<string, BattleInput>();
+/** dir → (name → input)。dir 為 '' 代表 sample_battles 根目錄（v1）。 */
+const SAMPLES = new Map<string, Map<string, BattleInput>>();
 for (const [path, mod] of Object.entries(sampleModules)) {
-  const name = path.split('/').pop()?.replace(/\.json$/, '');
+  const parts = path.split('/');
+  const name = parts.pop()?.replace(/\.json$/, '');
+  const dir = parts[parts.length - 1] === 'sample_battles' ? '' : (parts.pop() ?? '');
   if (name === undefined || name === 'batch_example') continue;
-  SAMPLES.set(name, { seed: mod.seed, throwA: mod.throwA, throwB: mod.throwB });
+  if (mod.throwA === undefined) continue;
+  let bucket = SAMPLES.get(dir);
+  if (bucket === undefined) {
+    bucket = new Map();
+    SAMPLES.set(dir, bucket);
+  }
+  bucket.set(name, { seed: mod.seed, throwA: mod.throwA, throwB: mod.throwB });
 }
+// ── 物理設定 ────────────────────────────────────────────────────────────
+
+/**
+ * 播放器目前使用的物理設定（預設為清單第一項＝最新的探索設定）。
+ *
+ * **必須在 `views` 之前宣告** —— 車體 mesh 由它決定，而 `views` 在場景區塊就建好了。
+ * 放在下方的播放狀態區塊會踩到 TDZ，畫面全黑且只有一行 ReferenceError。
+ */
+let preset: PlayerPreset = PLAYER_PRESETS[0] as PlayerPreset;
 
 // ── 品質 ────────────────────────────────────────────────────────────────
 
@@ -97,7 +118,14 @@ orbit.zoomSpeed = 0.9;
 orbit.minDistance = 0.15;
 orbit.maxDistance = arenaExtent() * 4;
 
-const views: VehicleView[] = [buildVehicle(COLOR_CAR_A), buildVehicle(COLOR_CAR_B)];
+function vehicleShape(): ReturnType<typeof resolveVehicle> {
+  return resolveVehicle(preset.physics?.vehicle, preset.physics?.vehiclePreset);
+}
+
+let views: VehicleView[] = [
+  buildVehicle(COLOR_CAR_A, vehicleShape()),
+  buildVehicle(COLOR_CAR_B, vehicleShape()),
+];
 for (const view of views) scene.add(view.root);
 
 const labelLayer = document.createElement('div');
@@ -198,9 +226,20 @@ const controls = new Controls(
       applyQuality(renderer, scene, quality);
       resize();
     },
-    resolveSample: (name) => SAMPLES.get(name),
+    onPreset: (next) => {
+      preset = next;
+      // 車體換了，mesh 必須重建 —— 部件數量與形狀都不同。
+      for (const view of views) scene.remove(view.root);
+      views = [buildVehicle(COLOR_CAR_A, vehicleShape()), buildVehicle(COLOR_CAR_B, vehicleShape())];
+      for (const view of views) scene.add(view.root);
+      // 範例清單也隨 preset 換目錄：舊車體的投擲點在新餘裕下可能不合法。
+      const names = [...(SAMPLES.get(next.sampleDir) ?? new Map<string, BattleInput>()).keys()];
+      controls.setSampleNames(names.sort());
+      controls.loadSelectedSample();
+    },
+    resolveSample: (name) => SAMPLES.get(preset.sampleDir)?.get(name),
   },
-  [...SAMPLES.keys()].sort(),
+  [...(SAMPLES.get(PLAYER_PRESETS[0]?.sampleDir ?? '') ?? new Map()).keys()].sort(),
 );
 // 控制列是 #app 的子元素而非 .viewport 的：桌機與橫向時它絕對定位浮在 3D 視圖底部，
 // 直向時 CSS 把它改回 static、成為版面的第二列。無論哪一種，它都不在可收合的面板裡，
@@ -236,9 +275,13 @@ async function run(input: BattleInput): Promise<void> {
   controls.setOutcome('');
   try {
     // 一律附帶診斷：實測不增加產生時間，而輪子的懸吊位置需要接觸點才畫得對。
-    const outcome = await trajectoryClient.generate(input, { diagnostics: true }, (state) => {
-      controls.setStatus(`產生軌跡中… ${(state.elapsedMs / 1000).toFixed(1)} 秒`);
-    });
+    const outcome = await trajectoryClient.generate(
+      input,
+      { diagnostics: true, ...(preset.physics === undefined ? {} : { physics: preset.physics }) },
+      (state) => {
+        controls.setStatus(`產生軌跡中… ${(state.elapsedMs / 1000).toFixed(1)} 秒`);
+      },
+    );
     lastViaWorker = outcome.viaWorker;
     attach(outcome.trajectory, outcome.elapsedMs);
   } catch (error) {
@@ -392,7 +435,7 @@ window.__player = {
   frameCount: () => player?.trajectory.frameCount ?? 0,
   isPlaying: () => player?.isPlaying ?? false,
   run: async (name: string) => {
-    const input = SAMPLES.get(name);
+    const input = SAMPLES.get(preset.sampleDir)?.get(name);
     if (input !== undefined) await run(input);
   },
 };

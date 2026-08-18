@@ -1,0 +1,33 @@
+{
+  "_comment": "official preset（第五輪鏟形車體）。A_WINS / FLIP / 92 幀。",
+  "physics": {
+    "vehiclePreset": "wedge",
+    "substeps": 4,
+    "vehicleDerivedThrowMargin": true,
+    "enforceMinThrowSeparation": true
+  },
+  "seed": 9047,
+  "throwA": {
+    "x": -0.19009561200515435,
+    "z": -0.1665063705003124,
+    "y": 0.0617778468132019,
+    "yaw": 3.88868960869675,
+    "pitch": -0.020062637329101574,
+    "speed": 2.1859359741210938,
+    "spin": -10.376412868499756
+  },
+  "throwB": {
+    "x": -0.12885621284221133,
+    "z": 0.30405264922229425,
+    "y": 0.06587448835372925,
+    "yaw": 5.745421677085861,
+    "pitch": 0.20967521667480465,
+    "speed": 1.5620484948158264,
+    "spin": -11.43326997756958
+  },
+  "expected": {
+    "result": "A_WINS",
+    "reason": "FLIP",
+    "frames": 92
+  }
+}

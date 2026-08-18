@@ -1,0 +1,33 @@
+{
+  "_comment": "official preset（第五輪鏟形車體）。DRAW / TIMEOUT / 7200 幀。",
+  "physics": {
+    "vehiclePreset": "wedge",
+    "substeps": 4,
+    "vehicleDerivedThrowMargin": true,
+    "enforceMinThrowSeparation": true
+  },
+  "seed": 9000,
+  "throwA": {
+    "x": -0.04308752618922301,
+    "z": -0.007572131606992605,
+    "y": 0.06923038959503174,
+    "yaw": 2.471037070418207,
+    "pitch": -0.03887261152267457,
+    "speed": 0.9170269966125488,
+    "spin": -7.009365558624268
+  },
+  "throwB": {
+    "x": 0.20992741291266395,
+    "z": -0.04567206478062108,
+    "y": 0.10933656692504883,
+    "yaw": 4.8488215162845805,
+    "pitch": -0.18892257213592528,
+    "speed": 2.8583595156669617,
+    "spin": 6.970865726470947
+  },
+  "expected": {
+    "result": "DRAW",
+    "reason": "TIMEOUT",
+    "frames": 7200
+  }
+}

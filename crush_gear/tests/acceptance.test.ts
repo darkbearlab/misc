@@ -462,11 +462,16 @@ describe('§2 / §3 專案級禁令', () => {
   });
 
   // 測試名稱刻意不寫出被禁的字面 API 名稱，否則本檔會把自己掃成違例。
-  it('全專案不使用未受控的隨機來源或牆上時間（§3.1 / §3.2）', () => {
+  it('模擬核心不使用未受控的隨機來源或牆上時間(§3.1 / §3.2)', () => {
+    // §3 禁令保護的是**模擬**的決定性，因此檢查範圍是 src/sim 與 src/data。
+    //
+    // src/ui 明確排除：UI 的「隨機產生」是使用者輸入的來源，不是模擬過程。
+    // 隨機的是輸入，任何一組輸入送進 simulate() 之後仍完全可重現
+    // ——由 tests/random-throw.test.ts 驗證。設計方 2026-08-18 裁決此範圍。
+    // src/render 也排除：它需要 performance.now() 量測產生耗時與 fps。
     const all = [
-      ...collectSourceFiles(join(REPO_ROOT, 'src')),
-      ...collectSourceFiles(join(REPO_ROOT, 'tools')),
-      ...collectSourceFiles(join(REPO_ROOT, 'tests')),
+      ...collectSourceFiles(join(REPO_ROOT, 'src', 'sim')),
+      ...collectSourceFiles(join(REPO_ROOT, 'src', 'data')),
     ];
     const offenders = all.filter((file) => {
       const text = readFileSync(file, 'utf8');

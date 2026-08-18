@@ -21,6 +21,7 @@ import type {
   BattleInput,
   BattleReason,
   BattleResult,
+  PhysicsOverride,
   ThrowParams,
   TrajectoryDiagnostics,
 } from '../sim/types.js';
@@ -92,6 +93,14 @@ export function currentPhysicsIdentity(): {
 }
 
 export type GenerateOptions = {
+  /**
+   * 物理覆寫（車體 preset、substep 等）。
+   *
+   * **播放器的預設值與模擬核心的預設值是兩件事。** 核心不指定時走 v1 凍結路徑，
+   * fixture 與 verify-platform 依賴這一點；播放器則預設載入最新的探索設定，
+   * 否則設計方永遠看不到探索成果。兩者互不影響。
+   */
+  physics?: PhysicsOverride;
   /** 一併記錄 §P1.5 的除錯資料（約 1.7 MB / 7200 幀）。預設 false。 */
   diagnostics?: boolean;
   /** 覆寫 `generatedAt`；不指定時取現在時刻。測試會指定以取得可重現的輸出。 */
@@ -110,6 +119,7 @@ export async function generateTrajectory(
   const result = await simulate(input, {
     trajectory: true,
     ...(options.diagnostics === true ? { diagnostics: true } : {}),
+    ...(options.physics === undefined ? {} : { physics: options.physics }),
   });
 
   const frames = result.trajectory;

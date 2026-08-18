@@ -26,6 +26,8 @@ export const COLOR_WEAPON = 0xe8edf5;
 export const COLOR_WHEEL = 0x22262f;
 /** 該輪離地時的輪子顏色（§P1.8.2 的除錯疊圖會用到，P1-b 先接上）。 */
 export const COLOR_WHEEL_AIRBORNE = 0xffd24a;
+/** 輪武器：與前後武器區分開，否則六個部件疊在一起分不出誰是誰。 */
+export const COLOR_WHEEL_WEAPON = 0x9aa7c4;
 
 // ── 材質外觀 ────────────────────────────────────────────────────────────
 // 這些是 PBR 的外觀參數，與尺寸無關。刻意集中在此，讓 scene.ts / vehicle.ts
@@ -34,6 +36,13 @@ export const COLOR_WHEEL_AIRBORNE = 0xffd24a;
 export const WEAPON_METALNESS = 0.6;
 export const WEAPON_ROUGHNESS = 0.35;
 export const OUT_RING_OPACITY = 0.75;
+/**
+ * 車身外殼的不透明度。
+ *
+ * 外殼是最大的部件（140 × 90 × 42），不透明的話底盤、輪武器與輪子全部看不見。
+ * 半透明是**除錯需求**，不是美術選擇。
+ */
+export const SHELL_OPACITY = 0.45;
 
 // ── 光照 ────────────────────────────────────────────────────────────────
 
@@ -67,7 +76,8 @@ export const FOLLOW_SMOOTHING = 6;
 export const WHEEL_VISUAL_RADIUS = SUSPENSION_REST_LENGTH;
 
 /** 輪寬，取輪距的一個比例；輪子不是剛體，沒有真實寬度可言。 */
-export const WHEEL_VISUAL_WIDTH = TRACK_WIDTH * 0.18;
+export const WHEEL_WIDTH_FACTOR = 0.18;
+export const WHEEL_VISUAL_WIDTH = TRACK_WIDTH * WHEEL_WIDTH_FACTOR;
 
 export const WHEEL_SEGMENTS = 16;
 

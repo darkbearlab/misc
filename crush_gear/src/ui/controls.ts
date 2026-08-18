@@ -24,6 +24,8 @@ import { OVERLAY_FEATURES, OVERLAY_LABELS, type OverlayFeature } from '../render
 import { stadiumDistance } from '../sim/judge.js';
 import { Rng } from '../sim/rng.js';
 import type { BattleInput, ThrowParams } from '../sim/types.js';
+import { PHYSICS_VERSION } from '../data/version.js';
+import { PLAYER_PRESETS, type PlayerPreset } from './presets.js';
 
 export type CameraMode = 'overview' | 'follow-a' | 'follow-b' | 'free';
 
@@ -50,6 +52,8 @@ export type ControlsHandlers = {
   onOverlay: (feature: OverlayFeature, enabled: boolean) => void;
   onShowValues: (enabled: boolean) => void;
   onQuality: (level: QualityLevel) => void;
+  /** 切換物理設定；main 會重建車體 mesh 並重新產生軌跡。 */
+  onPreset: (preset: PlayerPreset) => void;
   /**
    * 依名稱取得範例輸入。
    *
@@ -149,6 +153,22 @@ function repeatable(button: HTMLButtonElement, action: () => void): void {
   }
 }
 
+/**
+ * 產生一個真正隨機的 seed（32-bit 有號整數）。
+ *
+ * 優先用 `crypto.getRandomValues`；沒有時退回 `Math.random`。
+ * 這是**使用者輸入的來源**，不是模擬過程 —— 見「隨機產生」按鈕的說明。
+ */
+export function randomSeed(): number {
+  const c = globalThis.crypto;
+  if (c !== undefined && typeof c.getRandomValues === 'function') {
+    const buf = new Int32Array(1);
+    c.getRandomValues(buf);
+    return buf[0] as number;
+  }
+  return Math.floor((Math.random() - 0.5) * 2 ** 32) | 0;
+}
+
 /** 在 stadium 內以拒絕取樣產生合法投擲（§P1.8.3、依 Phase 0 §7 的範圍）。 */
 export function randomThrow(rng: Rng): ThrowParams {
   const maxZ = THROW_MAX_STADIUM_DISTANCE + FIELD_HALF_SEGMENT;
@@ -191,7 +211,7 @@ export class Controls {
   private readonly frameReadout: HTMLElement;
   private readonly scrubBubble: HTMLElement;
   private readonly progress: HTMLElement;
-  private randomCounter = 0;
+  private readonly presetLine: HTMLElement;
   /** 使用者正在拖曳時間軸時，暫停由播放迴圈回寫滑桿位置。 */
   private scrubbing = false;
 
@@ -334,8 +354,14 @@ export class Controls {
     const randomButton = el('button', 'primary', '隨機產生');
     randomButton.type = 'button';
     randomButton.addEventListener('click', () => {
-      this.randomCounter += 1;
-      const rng = new Rng((this.readSeed() + this.randomCounter) | 0);
+      // 真隨機：每次都給一個新的 seed 與新的投擲參數。
+      //
+      // §3 禁令 1（禁止 Math.random）約束的是 src/sim/，目的是保證**模擬**的決定性。
+      // UI 產生一組新輸入不在該範圍內 —— 隨機的是輸入，不是過程：
+      // 同一組 seed 與投擲參數重播必定得到相同結果（tests/random-throw.test.ts）。
+      const seed = randomSeed();
+      this.setSeed(seed);
+      const rng = new Rng(seed);
       this.setThrow('A', randomThrow(rng));
       this.setThrow('B', randomThrow(rng));
       this.run();
@@ -346,6 +372,24 @@ export class Controls {
     this.statusLine = el('div', 'status', '尚未產生軌跡');
     this.outcomeLine = el('div', 'outcome');
     actions.append(this.statusLine, this.outcomeLine);
+
+    // ── 物理設定（探索成果必須看得到）──────────────────────────────────
+    const presetSection = el('section');
+    presetSection.append(el('h2', undefined, '物理設定'));
+    presetSection.append(
+      segmented<string>(
+        PLAYER_PRESETS.map((p) => ({ value: p.id, label: p.label })),
+        PLAYER_PRESETS[0]?.id ?? 'v1',
+        (id) => {
+          const preset = PLAYER_PRESETS.find((p) => p.id === id);
+          if (preset === undefined) return;
+          this.setPresetSummary(preset);
+          this.handlers.onPreset(preset);
+        },
+      ).element,
+    );
+    this.presetLine = el('div', 'status');
+    presetSection.append(this.presetLine);
 
     // ── 相機（§P1.8.1）────────────────────────────────────────────────
     const cameraSection = el('section');
@@ -417,7 +461,16 @@ export class Controls {
     this.seedInput.step = '1';
     this.seedInput.value = '20260817';
     this.seedInput.inputMode = 'numeric';
-    seedRow.append(this.seedInput);
+    const copySeed = el('button', undefined, '複製');
+    copySeed.type = 'button';
+    copySeed.addEventListener('click', () => {
+      void globalThis.navigator.clipboard.writeText(this.seedInput.value);
+      copySeed.textContent = '已複製';
+      setTimeout(() => {
+        copySeed.textContent = '複製';
+      }, 1200);
+    });
+    seedRow.append(this.seedInput, copySeed);
     inputBody.append(seedRow);
 
     for (const car of ['A', 'B'] as const) {
@@ -448,7 +501,16 @@ export class Controls {
     inputBody.append(runRow);
     inputFold.append(inputBody);
 
-    this.root.append(actions, cameraSection, qualitySection, overlayFold, inputFold);
+    this.root.append(
+      actions,
+      presetSection,
+      cameraSection,
+      qualitySection,
+      overlayFold,
+      inputFold,
+    );
+    const initial = PLAYER_PRESETS[0];
+    if (initial !== undefined) this.setPresetSummary(initial);
   }
 
   private checkbox(label: string, initial: boolean, onChange: (on: boolean) => void): HTMLElement {
@@ -493,6 +555,28 @@ export class Controls {
 
   setSeed(seed: number): void {
     this.seedInput.value = String(seed);
+  }
+
+  /** 顯示目前使用中的設定:名稱 + physicsVersion + substep + μ_floor。 */
+  setPresetSummary(preset: PlayerPreset): void {
+    const substeps = preset.physics?.substeps ?? 1;
+    const via = preset.physics === undefined ? '預設路徑' : '覆寫載入';
+    this.presetLine.textContent =
+      preset.summary +
+      '　（physicsVersion ' + String(PHYSICS_VERSION) +
+      '，' + via +
+      '，substep ' + String(substeps) + '）';
+  }
+
+  /** 更新範例清單（不同 preset 有各自的範例目錄）。 */
+  setSampleNames(names: readonly string[]): void {
+    this.sampleSelect.replaceChildren();
+    for (const name of names) {
+      const option = el('option');
+      option.value = name;
+      option.textContent = name;
+      this.sampleSelect.append(option);
+    }
   }
 
   setStatus(text: string): void {
