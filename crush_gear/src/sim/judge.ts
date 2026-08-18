@@ -5,13 +5,8 @@
  * 此時 reason 取優先序較高者，即只要任一方是 OUT 就記為 OUT。
  */
 
-import {
-  FIELD_HALF_SEGMENT,
-  FLIP_HOLD_FRAMES,
-  OUT_THRESHOLD,
-  OUT_Y_LIMIT,
-  TIMEOUT_FRAMES,
-} from '../data/constants.js';
+import { FIELD_HALF_SEGMENT, FLIP_HOLD_FRAMES, OUT_Y_LIMIT, TIMEOUT_FRAMES } from '../data/constants.js';
+import { DEFAULT_ARENA, stadiumDistanceIn, type ResolvedArena } from './arena.js';
 import { dot, WORLD_UP, type Outcome, type VehicleJudgeState } from './types.js';
 
 /**
@@ -40,9 +35,12 @@ export function stadiumDistance(x: number, z: number): number {
 }
 
 /** §8.1 出界：質心超出圍欄外緣的餘裕範圍，或掉落至地板平面以下。 */
-export function isOut(state: VehicleJudgeState): boolean {
+export function isOut(state: VehicleJudgeState, arena: ResolvedArena = DEFAULT_ARENA): boolean {
   const { com } = state;
-  return stadiumDistance(com.x, com.z) > OUT_THRESHOLD || com.y < OUT_Y_LIMIT;
+  return (
+    stadiumDistanceIn(arena.halfSegment, com.x, com.z) > arena.outThreshold ||
+    com.y < OUT_Y_LIMIT
+  );
 }
 
 /** §8.2 翻覆瞬時條件：車體 up vector 與世界 +Y 的內積 < 0。 */
@@ -54,6 +52,12 @@ export class Judge {
   /** 連續翻覆幀數計數器，條件不滿足時歸零。 */
   private flipFramesA = 0;
   private flipFramesB = 0;
+
+  /**
+   * @param arena 場地幾何；不指定時為 `constants.ts` 的預設值。
+   *   出界門檻與 stadium 距離都取自這裡，場地縮放時判定才會跟著變。
+   */
+  constructor(private readonly arena: ResolvedArena = DEFAULT_ARENA) {}
 
   /**
    * 目前的連續翻覆幀數（唯讀），供 §P1.5 的除錯疊圖顯示「快要 FLIP 了」。
@@ -71,8 +75,8 @@ export class Judge {
    * @param frame 目前已推進的幀數（第 0 幀為投入瞬間，尚未 step）。
    */
   update(frame: number, a: VehicleJudgeState, b: VehicleJudgeState): Outcome | null {
-    const outA = isOut(a);
-    const outB = isOut(b);
+    const outA = isOut(a, this.arena);
+    const outB = isOut(b, this.arena);
 
     this.flipFramesA = isInverted(a) ? this.flipFramesA + 1 : 0;
     this.flipFramesB = isInverted(b) ? this.flipFramesB + 1 : 0;

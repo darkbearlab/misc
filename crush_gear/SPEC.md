@@ -55,6 +55,7 @@ src/
     world.ts          場地與物理世界建構
     vehicle.ts        車體剛體、懸吊、輪胎力
     tire.ts           輪胎力模型(純函式)
+    arena.ts          場地幾何解析(R/L → 出界門檻、圍欄、地板、投擲範圍)
     judge.ts          勝負判定與 stadium 距離函數
     rng.ts            seeded PRNG(xoshiro128**)
     checksum.ts       狀態雜湊(FNV-1a 32-bit)

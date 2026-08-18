@@ -14,11 +14,11 @@ import {
   DT,
   THROW_FENCE_MARGIN,
   THROW_LIMITS,
-  THROW_MAX_STADIUM_DISTANCE,
   TIMEOUT_FRAMES,
 } from '../data/constants.js';
+import { DEFAULT_ARENA, resolveArena, stadiumDistanceIn, type ResolvedArena } from './arena.js';
 import { checksumFrame } from './checksum.js';
-import { Judge, stadiumDistance } from './judge.js';
+import { Judge } from './judge.js';
 import { Rng } from './rng.js';
 import type {
   BattleInput,
@@ -49,18 +49,22 @@ function checkRange(label: string, value: number, min: number, max: number, maxI
  *
  * @param label 用於錯誤訊息的來源標籤，例如 `throwA`。
  */
-export function validateThrowParams(label: string, p: ThrowParams): void {
+export function validateThrowParams(
+  label: string,
+  p: ThrowParams,
+  arena: ResolvedArena = DEFAULT_ARENA,
+): void {
   // §7：投入點必須位於 stadium 內，且與圍欄內緣至少保持 THROW_FENCE_MARGIN 的距離。
   // v1.0 的矩形範圍檢查已作廢。
   if (!Number.isFinite(p.x) || !Number.isFinite(p.z)) {
     throw new RangeError(`ThrowParams.${label}.x/z must be finite numbers.`);
   }
-  const distance = stadiumDistance(p.x, p.z);
-  if (distance > THROW_MAX_STADIUM_DISTANCE) {
+  const distance = stadiumDistanceIn(arena.halfSegment, p.x, p.z);
+  if (distance > arena.throwMaxStadiumDistance) {
     throw new RangeError(
       `ThrowParams.${label} spawn point (${p.x}, ${p.z}) is ${distance.toFixed(4)} m from the ` +
-        `stadium centre line; it must stay within ${THROW_MAX_STADIUM_DISTANCE} m ` +
-        `(i.e. at least ${THROW_FENCE_MARGIN} m clear of the fence).`,
+        `stadium centre line; it must stay within ${String(arena.throwMaxStadiumDistance)} m ` +
+        `(i.e. at least ${String(THROW_FENCE_MARGIN)} m clear of the fence).`,
     );
   }
   checkRange(`${label}.y`, p.y, THROW_LIMITS.y.min, THROW_LIMITS.y.max, true);
@@ -72,12 +76,15 @@ export function validateThrowParams(label: string, p: ThrowParams): void {
 }
 
 /** §7 + §9.1 的輸入驗證。 */
-export function validateBattleInput(input: BattleInput): void {
+export function validateBattleInput(
+  input: BattleInput,
+  arena: ResolvedArena = DEFAULT_ARENA,
+): void {
   if (!Number.isInteger(input.seed)) {
     throw new RangeError(`BattleInput.seed must be an integer, got ${String(input.seed)}`);
   }
-  validateThrowParams('throwA', input.throwA);
-  validateThrowParams('throwB', input.throwB);
+  validateThrowParams('throwA', input.throwA, arena);
+  validateThrowParams('throwB', input.throwB, arena);
 }
 
 /**
@@ -87,11 +94,12 @@ export function validateBattleInput(input: BattleInput): void {
  * 之後每 CHECKSUM_SAMPLE_INTERVAL 幀記錄一次，結束幀必記一次（§9.2）。
  */
 export async function simulate(input: BattleInput, options: SimOptions = {}): Promise<SimResult> {
-  validateBattleInput(input);
+  const arena = resolveArena(options.physics);
+  validateBattleInput(input, arena);
   await initPhysics();
 
   const rng = new Rng(input.seed);
-  const world = createWorld();
+  const world = createWorld(arena);
 
   try {
     // §9.3 剛體建立順序固定：先車 A 後車 B。
@@ -99,7 +107,7 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
     const vehicleB = new Vehicle(world, input.throwB, options.physics);
     const vehicles = [vehicleA, vehicleB] as const;
 
-    const judge = new Judge();
+    const judge = new Judge(arena);
     const checksums: number[] = [];
     const denseChecksums: number[] | null = options.dense === true ? [] : null;
     let capturedState: SimResult['capturedState'];
@@ -167,7 +175,11 @@ export async function simulate(input: BattleInput, options: SimOptions = {}): Pr
       if (stadiumDist === null || flipCounter === null) return;
       for (let v = 0; v < vehicles.length; v += 1) {
         const com = (vehicles[v] as Vehicle).centerOfMass();
-        (stadiumDist[v] as Float32Array)[currentFrame] = stadiumDistance(com.x, com.z);
+        (stadiumDist[v] as Float32Array)[currentFrame] = stadiumDistanceIn(
+          arena.halfSegment,
+          com.x,
+          com.z,
+        );
         (flipCounter[v] as Uint16Array)[currentFrame] = judge.flipFrames(v);
       }
     };

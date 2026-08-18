@@ -195,6 +195,15 @@ export type PhysicsOverride = {
   tireFrictionCoef?: number;
   /** 覆寫 `WHEEL_SURFACE_SPEED`。 */
   wheelSurfaceSpeed?: number;
+  /**
+   * 覆寫 stadium 半徑 R。
+   *
+   * 出界門檻、26 段圍欄、地板 cuboid、投擲合法範圍全部由 `resolveArena()` 連動重算，
+   * 呼叫端無從指定不一致的組合。
+   */
+  fieldRadius?: number;
+  /** 覆寫 stadium 直線段長度 L。 */
+  fieldSegmentLength?: number;
 };
 
 export type SimOptions = {
