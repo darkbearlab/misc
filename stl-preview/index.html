@@ -1,0 +1,1387 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STL 列印預覽排版器</title>
+<style>
+:root{
+  --bg:#12141a; --panel:#191c24; --panel-2:#20242e; --line:#2c3240;
+  --fg:#e6e9f0; --dim:#98a1b3; --faint:#6c7688;
+  --accent:#5aa9ff; --accent-dim:#2d5f96;
+  --warn:#ff6b6b; --ok:#4ade80;
+  --radius:8px;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg); color:var(--fg);
+  font:13px/1.5 -apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  overflow:hidden; -webkit-font-smoothing:antialiased;
+}
+button,input,select{font:inherit;color:inherit}
+button{
+  background:var(--panel-2); border:1px solid var(--line); color:var(--fg);
+  border-radius:6px; padding:5px 9px; cursor:pointer; white-space:nowrap;
+}
+button:hover{background:#2b3140;border-color:#3d465a}
+button:active{transform:translateY(1px)}
+button.primary{background:var(--accent-dim);border-color:#3b7ac2}
+button.primary:hover{background:#356ba9}
+button.danger:hover{background:#5a2626;border-color:#8b3a3a}
+button:disabled{opacity:.4;cursor:default;transform:none}
+input[type=number],input[type=text],select{
+  background:#0e1016; border:1px solid var(--line); border-radius:6px;
+  padding:4px 6px; width:100%; min-width:0;
+}
+input[type=number]{ -moz-appearance:textfield }
+input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--accent)}
+
+#app{display:flex;height:100%;width:100%}
+
+/* ---------- 左側面板 ---------- */
+#left{
+  width:290px; flex:0 0 290px; background:var(--panel);
+  border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0;
+}
+.sec{border-bottom:1px solid var(--line);padding:10px 12px}
+.sec h2{
+  margin:0 0 8px; font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--faint); font-weight:600;
+}
+#drop{
+  border:1.5px dashed #39415a; border-radius:var(--radius); padding:16px 10px;
+  text-align:center; color:var(--dim); cursor:pointer; transition:.12s;
+}
+#drop:hover,#drop.over{border-color:var(--accent);background:#1b2331;color:var(--fg)}
+#drop b{display:block;color:var(--fg);margin-bottom:2px}
+#drop small{color:var(--faint)}
+
+#listWrap{flex:1 1 auto;overflow-y:auto;min-height:0;padding:6px}
+#list{display:flex;flex-direction:column;gap:4px}
+.item{
+  display:grid; grid-template-columns:auto auto 1fr auto auto; align-items:center; gap:7px;
+  padding:6px 7px; border-radius:6px; border:1px solid transparent; cursor:pointer;
+}
+.item:hover{background:var(--panel-2)}
+.item.sel{background:#22314a;border-color:var(--accent)}
+.item.oob .nm{color:var(--warn)}
+.item.hidden .nm{opacity:.4;text-decoration:line-through}
+.swatch{width:11px;height:11px;border-radius:3px;flex:none;box-shadow:0 0 0 1px #0006 inset}
+.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm small{display:block;color:var(--faint);font-size:10.5px}
+.icobtn{
+  background:none;border:none;padding:2px 3px;color:var(--faint);font-size:12px;line-height:1;border-radius:4px;
+}
+.icobtn:hover{background:#333b4d;color:var(--fg)}
+.item input[type=checkbox]{accent-color:var(--accent);margin:0;cursor:pointer}
+#empty{padding:22px 12px;text-align:center;color:var(--faint);font-size:12px}
+
+#stats{font-size:12px;color:var(--dim)}
+#stats div{display:flex;justify-content:space-between;padding:1.5px 0}
+#stats b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* ---------- 中間視圖 ---------- */
+#center{flex:1 1 auto;position:relative;min-width:0;display:flex;flex-direction:column}
+#toolbar{
+  display:flex;gap:6px;align-items:center;padding:8px 10px;
+  background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap;
+}
+#toolbar .grp{display:flex;gap:4px;align-items:center}
+#toolbar .sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+#toolbar label{color:var(--faint);font-size:11.5px;white-space:nowrap}
+#toolbar select,#toolbar input[type=number]{width:auto;min-width:64px}
+#view{flex:1 1 auto;position:relative;min-height:0;background:#0d0f14}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#hint{
+  position:absolute;left:12px;bottom:10px;color:var(--faint);font-size:11px;
+  pointer-events:none;text-shadow:0 1px 3px #000;line-height:1.7;
+}
+#hint kbd{
+  background:#242a36;border:1px solid #39415a;border-bottom-width:2px;border-radius:4px;
+  padding:0 4px;font:inherit;font-size:10.5px;color:var(--dim);
+}
+#banner{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  background:#3a1f22;border:1px solid #7a3b3b;color:#ffb4b4;
+  padding:5px 12px;border-radius:20px;font-size:12px;display:none;pointer-events:none;
+}
+#toast{
+  position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+  background:#232a38;border:1px solid var(--line);padding:6px 14px;border-radius:20px;
+  font-size:12px;opacity:0;transition:opacity .25s;pointer-events:none;
+}
+
+/* ---------- 右側檢視器 ---------- */
+#right{
+  width:264px;flex:0 0 264px;background:var(--panel);border-left:1px solid var(--line);
+  overflow-y:auto;min-height:0;
+}
+#right .sec:last-child{border-bottom:none}
+#noSel{padding:26px 14px;color:var(--faint);text-align:center;font-size:12px}
+.row{display:grid;grid-template-columns:18px 1fr;gap:6px;align-items:center;margin-bottom:5px}
+.row span{color:var(--faint);font-size:11px;text-align:center}
+.btns{display:flex;gap:4px;flex-wrap:wrap}
+.btns button{flex:1 1 auto;padding:5px 4px;text-align:center;font-size:12px}
+.axisrow{display:grid;grid-template-columns:16px 1fr 1fr;gap:4px;align-items:center;margin-bottom:4px}
+.axisrow span{color:var(--faint);font-size:11px;text-align:center}
+.kv{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);padding:1.5px 0}
+.kv b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+#selName{
+  font-weight:600;margin:0 0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:13px;
+}
+.oobmsg{color:var(--warn);font-size:11.5px;margin-top:6px;display:none}
+
+@media (max-width:900px){
+  #app{flex-direction:column}
+  #left,#right{width:100%;flex:0 0 auto;max-height:34vh;border:none;border-top:1px solid var(--line)}
+  #center{order:-1;min-height:46vh}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <aside id="left">
+    <div class="sec">
+      <h2>匯入</h2>
+      <div id="drop">
+        <b>拖曳 STL 到這裡</b>
+        <small>或點擊選擇檔案（可多選）</small>
+      </div>
+      <input id="file" type="file" accept=".stl" multiple hidden>
+    </div>
+
+    <div class="sec" style="padding:8px 12px">
+      <div class="btns">
+        <button id="btnArrange">自動排列</button>
+        <button id="btnDropAll">全部貼底</button>
+        <button id="btnClear" class="danger">清空</button>
+      </div>
+    </div>
+
+    <div id="listWrap">
+      <div id="list"></div>
+      <div id="empty">尚未匯入模型</div>
+    </div>
+
+    <div class="sec">
+      <h2>列印清單統計</h2>
+      <div id="stats"></div>
+      <div class="btns" style="margin-top:8px">
+        <button id="btnCopy">複製清單</button>
+        <button id="btnExport">匯出整盤 STL</button>
+      </div>
+    </div>
+  </aside>
+
+  <main id="center">
+    <div id="toolbar">
+      <div class="grp">
+        <label>列印床</label>
+        <select id="bedPreset"></select>
+        <input id="bedW" type="number" min="10" step="1" title="寬 X (mm)">
+        <input id="bedD" type="number" min="10" step="1" title="深 Y (mm)">
+        <input id="bedH" type="number" min="10" step="1" title="高 Z (mm)">
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <label>視角</label>
+        <button data-view="iso">等角</button>
+        <button data-view="top">上</button>
+        <button data-view="front">前</button>
+        <button data-view="right">右</button>
+        <button id="btnFit">框選全部</button>
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <label><input type="checkbox" id="autodrop" checked style="width:auto;accent-color:var(--accent)"> 旋轉後自動貼底</label>
+        <label style="margin-left:8px"><input type="checkbox" id="ghost" checked style="width:auto;accent-color:var(--accent)"> 未勾選半透明</label>
+      </div>
+    </div>
+    <div id="view">
+      <canvas id="cv"></canvas>
+      <div id="banner"></div>
+      <div id="toast"></div>
+      <div id="hint">
+        <kbd>左鍵拖曳模型</kbd> 在床面移動 ・ <kbd>Shift</kbd>+拖曳 調高度 ・ <kbd>空白處左鍵</kbd> 旋轉視角 ・ <kbd>右鍵/中鍵</kbd> 平移 ・ <kbd>滾輪</kbd> 縮放<br>
+        <kbd>X</kbd> <kbd>Y</kbd> <kbd>Z</kbd> 轉 90°（加 <kbd>Shift</kbd> 反向）・ <kbd>M</kbd> 鏡射 ・ <kbd>D</kbd> 複製 ・ <kbd>F</kbd> 對焦 ・ <kbd>Del</kbd> 刪除
+      </div>
+    </div>
+  </main>
+
+  <aside id="right">
+    <div id="noSel">選取一個模型以編輯<br>位置、旋轉與翻轉</div>
+    <div id="insp" hidden>
+      <div class="sec">
+        <h2>模型</h2>
+        <p id="selName"></p>
+        <div class="kv"><span>尺寸</span><b id="selSize">—</b></div>
+        <div class="kv"><span>體積</span><b id="selVol">—</b></div>
+        <div class="kv"><span>三角形</span><b id="selTri">—</b></div>
+        <div class="oobmsg" id="selOob">⚠ 超出列印範圍</div>
+      </div>
+
+      <div class="sec">
+        <h2>位置 (mm)</h2>
+        <div class="row"><span>X</span><input id="posX" type="number" step="1"></div>
+        <div class="row"><span>Y</span><input id="posY" type="number" step="1"></div>
+        <div class="row"><span>Z</span><input id="posZ" type="number" step="1"></div>
+        <div class="btns" style="margin-top:7px">
+          <button id="btnCenter">置中</button>
+          <button id="btnDrop">貼底</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>旋轉</h2>
+        <div class="axisrow"><span>X</span><button data-rot="x,-90">−90°</button><button data-rot="x,90">+90°</button></div>
+        <div class="axisrow"><span>Y</span><button data-rot="y,-90">−90°</button><button data-rot="y,90">+90°</button></div>
+        <div class="axisrow"><span>Z</span><button data-rot="z,-90">−90°</button><button data-rot="z,90">+90°</button></div>
+        <div class="row" style="grid-template-columns:1fr auto auto auto;margin-top:7px">
+          <input id="freeAng" type="number" value="45" step="5" title="自訂角度">
+          <button data-rotfree="x">X</button>
+          <button data-rotfree="y">Y</button>
+          <button data-rotfree="z">Z</button>
+        </div>
+        <button id="btnResetRot" style="width:100%;margin-top:6px">重設旋轉</button>
+      </div>
+
+      <div class="sec">
+        <h2>翻轉 / 鏡射</h2>
+        <div class="btns">
+          <button data-mirror="x">鏡射 X</button>
+          <button data-mirror="y">鏡射 Y</button>
+          <button data-mirror="z">鏡射 Z</button>
+        </div>
+        <p style="color:var(--faint);font-size:11px;margin:7px 0 0">鏡射會產生左右相反的零件，適合做對稱件。</p>
+      </div>
+
+      <div class="sec">
+        <h2>縮放</h2>
+        <div class="row" style="grid-template-columns:1fr auto"><input id="scale" type="number" value="100" step="5" min="1"><span style="color:var(--faint)">%</span></div>
+        <div class="btns" style="margin-top:6px">
+          <button data-scale="50">50%</button>
+          <button data-scale="100">100%</button>
+          <button data-scale="200">200%</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>操作</h2>
+        <div class="btns">
+          <button id="btnDup">複製一份</button>
+          <button id="btnDel" class="danger">刪除</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   STL 列印預覽排版器 — 單檔、零依賴、自帶 WebGL 渲染器
+   座標系：Z 軸向上（3D 列印慣例），床面位於 z=0，範圍 [0,W] x [0,D]
+   ========================================================================= */
+
+/* ---------------------------- 向量 / 矩陣 ---------------------------- */
+const V = {
+  sub: (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]],
+  add: (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]],
+  scale: (a, s) => [a[0]*s, a[1]*s, a[2]*s],
+  dot: (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2],
+  cross: (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]],
+  len: a => Math.hypot(a[0], a[1], a[2]),
+  norm(a){ const l = V.len(a) || 1; return [a[0]/l, a[1]/l, a[2]/l]; },
+};
+
+// 4x4 皆為 column-major（與 WebGL 一致）：m[col*4 + row]
+const M4 = {
+  ident: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+  mul(a, b){
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++)
+      for (let r = 0; r < 4; r++)
+        o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+    return o;
+  },
+  perspective(fovy, aspect, near, far){
+    const f = 1 / Math.tan(fovy / 2), o = new Float32Array(16);
+    o[0] = f/aspect; o[5] = f; o[11] = -1;
+    o[10] = (far+near)/(near-far); o[14] = 2*far*near/(near-far);
+    return o;
+  },
+  lookAt(eye, center, up){
+    const z = V.norm(V.sub(eye, center));
+    const x = V.norm(V.cross(up, z));
+    const y = V.cross(z, x);
+    return new Float32Array([
+      x[0], y[0], z[0], 0,
+      x[1], y[1], z[1], 0,
+      x[2], y[2], z[2], 0,
+      -V.dot(x, eye), -V.dot(y, eye), -V.dot(z, eye), 1,
+    ]);
+  },
+  invert(m){
+    const o = new Float32Array(16);
+    const a00=m[0],a01=m[1],a02=m[2],a03=m[3], a10=m[4],a11=m[5],a12=m[6],a13=m[7],
+          a20=m[8],a21=m[9],a22=m[10],a23=m[11], a30=m[12],a31=m[13],a32=m[14],a33=m[15];
+    const b00=a00*a11-a01*a10, b01=a00*a12-a02*a10, b02=a00*a13-a03*a10,
+          b03=a01*a12-a02*a11, b04=a01*a13-a03*a11, b05=a02*a13-a03*a12,
+          b06=a20*a31-a21*a30, b07=a20*a32-a22*a30, b08=a20*a33-a23*a30,
+          b09=a21*a32-a22*a31, b10=a21*a33-a23*a31, b11=a22*a33-a23*a32;
+    let det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06;
+    if (!det) return M4.ident();
+    det = 1 / det;
+    o[0]=(a11*b11-a12*b10+a13*b09)*det; o[1]=(a02*b10-a01*b11-a03*b09)*det;
+    o[2]=(a31*b05-a32*b04+a33*b03)*det; o[3]=(a22*b04-a21*b05-a23*b03)*det;
+    o[4]=(a12*b08-a10*b11-a13*b07)*det; o[5]=(a00*b11-a02*b08+a03*b07)*det;
+    o[6]=(a32*b02-a30*b05-a33*b01)*det; o[7]=(a20*b05-a22*b02+a23*b01)*det;
+    o[8]=(a10*b10-a11*b08+a13*b06)*det; o[9]=(a01*b08-a00*b10-a03*b06)*det;
+    o[10]=(a30*b04-a31*b02+a33*b00)*det; o[11]=(a21*b02-a20*b04-a23*b00)*det;
+    o[12]=(a11*b07-a10*b09-a12*b06)*det; o[13]=(a00*b09-a01*b07+a02*b06)*det;
+    o[14]=(a31*b01-a30*b03-a32*b00)*det; o[15]=(a20*b03-a21*b01+a22*b00)*det;
+    return o;
+  },
+  // 取 model 的 inverse-transpose 左上 3x3（法線矩陣）
+  normalMat(m){
+    const i = M4.invert(m);
+    return new Float32Array([i[0],i[4],i[8], i[1],i[5],i[9], i[2],i[6],i[10]]);
+  },
+  xformPoint(m, p){
+    return [
+      m[0]*p[0] + m[4]*p[1] + m[8]*p[2] + m[12],
+      m[1]*p[0] + m[5]*p[1] + m[9]*p[2] + m[13],
+      m[2]*p[0] + m[6]*p[1] + m[10]*p[2] + m[14],
+    ];
+  },
+  xformDir(m, p){
+    return [
+      m[0]*p[0] + m[4]*p[1] + m[8]*p[2],
+      m[1]*p[0] + m[5]*p[1] + m[9]*p[2],
+      m[2]*p[0] + m[6]*p[1] + m[10]*p[2],
+    ];
+  },
+};
+
+// 3x3 也是 column-major：m[col*3 + row]
+const M3 = {
+  ident: () => new Float32Array([1,0,0, 0,1,0, 0,0,1]),
+  mul(a, b){
+    const o = new Float32Array(9);
+    for (let c = 0; c < 3; c++)
+      for (let r = 0; r < 3; r++)
+        o[c*3+r] = a[r]*b[c*3] + a[3+r]*b[c*3+1] + a[6+r]*b[c*3+2];
+    return o;
+  },
+  rot(axis, rad){
+    const c = Math.cos(rad), s = Math.sin(rad);
+    if (axis === 'x') return new Float32Array([1,0,0, 0,c,s, 0,-s,c]);
+    if (axis === 'y') return new Float32Array([c,0,-s, 0,1,0, s,0,c]);
+    return new Float32Array([c,s,0, -s,c,0, 0,0,1]);
+  },
+  mirror(axis){
+    const m = M3.ident();
+    m[axis === 'x' ? 0 : axis === 'y' ? 4 : 8] = -1;
+    return m;
+  },
+  det: m => m[0]*(m[4]*m[8]-m[5]*m[7]) - m[3]*(m[1]*m[8]-m[2]*m[7]) + m[6]*(m[1]*m[5]-m[2]*m[4]),
+};
+
+/* ---------------------------- WebGL 初始化 ---------------------------- */
+const canvas = document.getElementById('cv');
+const gl = canvas.getContext('webgl', { antialias: true, alpha: false })
+        || canvas.getContext('experimental-webgl');
+if (!gl) {
+  document.getElementById('view').innerHTML =
+    '<p style="padding:40px;text-align:center;color:#ff8a8a">這個瀏覽器不支援 WebGL，無法顯示 3D 預覽。</p>';
+  throw new Error('no webgl');
+}
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const meshProg = program(`
+  attribute vec3 aPos;
+  attribute vec3 aNormal;
+  uniform mat4 uMVP, uModel;
+  uniform mat3 uNMat;
+  varying vec3 vN, vW;
+  void main(){
+    vN = uNMat * aNormal;
+    vW = (uModel * vec4(aPos, 1.0)).xyz;
+    gl_Position = uMVP * vec4(aPos, 1.0);
+  }`, `
+  precision mediump float;
+  uniform vec3 uColor, uEye;
+  uniform float uAlpha, uSel;
+  varying vec3 vN, vW;
+  void main(){
+    vec3 n = normalize(vN);
+    vec3 v = normalize(uEye - vW);
+    if (dot(n, v) < 0.0) n = -n;               // 雙面光照，鏡射後也正常
+    float d = 0.62 * max(dot(n, normalize(vec3(0.35, 0.5, 0.9))), 0.0)
+            + 0.22 * max(dot(n, normalize(vec3(-0.7, -0.4, 0.35))), 0.0)
+            + 0.30;
+    float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+    vec3 c = uColor * d + rim * (0.10 + 0.35 * uSel) * mix(vec3(1.0), vec3(0.45, 0.72, 1.0), uSel);
+    gl_FragColor = vec4(c, uAlpha);
+  }`);
+
+const lineProg = program(`
+  attribute vec3 aPos;
+  uniform mat4 uMVP;
+  void main(){ gl_Position = uMVP * vec4(aPos, 1.0); }`, `
+  precision mediump float;
+  uniform vec4 uColor;
+  void main(){ gl_FragColor = uColor; }`);
+
+const U = {
+  mvp: gl.getUniformLocation(meshProg, 'uMVP'),
+  model: gl.getUniformLocation(meshProg, 'uModel'),
+  nmat: gl.getUniformLocation(meshProg, 'uNMat'),
+  color: gl.getUniformLocation(meshProg, 'uColor'),
+  eye: gl.getUniformLocation(meshProg, 'uEye'),
+  alpha: gl.getUniformLocation(meshProg, 'uAlpha'),
+  sel: gl.getUniformLocation(meshProg, 'uSel'),
+  aPos: gl.getAttribLocation(meshProg, 'aPos'),
+  aNor: gl.getAttribLocation(meshProg, 'aNormal'),
+  lMvp: gl.getUniformLocation(lineProg, 'uMVP'),
+  lColor: gl.getUniformLocation(lineProg, 'uColor'),
+  lPos: gl.getAttribLocation(lineProg, 'aPos'),
+};
+const lineBuf = gl.createBuffer();
+
+function drawLines(verts, rgba, mvp){
+  gl.useProgram(lineProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(U.lPos);
+  gl.vertexAttribPointer(U.lPos, 3, gl.FLOAT, false, 0, 0);
+  gl.uniformMatrix4fv(U.lMvp, false, mvp);
+  gl.uniform4fv(U.lColor, rgba);
+  gl.drawArrays(gl.LINES, 0, verts.length / 3);
+}
+
+/* ---------------------------- STL 解析 ---------------------------- */
+function parseSTL(buffer){
+  const dv = new DataView(buffer);
+  // 判斷二進位：檔頭 80 bytes + uint32 面數 + 每面 50 bytes 必須剛好等於檔案長度
+  let binary = false;
+  if (buffer.byteLength >= 84) {
+    const n = dv.getUint32(80, true);
+    if (84 + n * 50 === buffer.byteLength) binary = true;
+  }
+  if (!binary) {
+    const head = new TextDecoder().decode(new Uint8Array(buffer, 0, Math.min(512, buffer.byteLength)));
+    if (!/^\s*solid/i.test(head)) binary = true;   // 面數對不上又不像 ASCII，當二進位試
+  }
+  return binary ? parseBinary(dv) : parseASCII(new TextDecoder().decode(buffer));
+}
+
+function parseBinary(dv){
+  const n = dv.getUint32(80, true);
+  const pos = new Float32Array(n * 9);
+  const nor = new Float32Array(n * 9);
+  let o = 84, p = 0;
+  for (let i = 0; i < n; i++) {
+    const nx = dv.getFloat32(o, true), ny = dv.getFloat32(o+4, true), nz = dv.getFloat32(o+8, true);
+    o += 12;
+    for (let v = 0; v < 3; v++) {
+      pos[p]   = dv.getFloat32(o, true);
+      pos[p+1] = dv.getFloat32(o+4, true);
+      pos[p+2] = dv.getFloat32(o+8, true);
+      nor[p] = nx; nor[p+1] = ny; nor[p+2] = nz;
+      o += 12; p += 3;
+    }
+    o += 2; // attribute byte count
+  }
+  return { pos, nor, tri: n };
+}
+
+function parseASCII(text){
+  const nums = [];
+  const re = /vertex\s+(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)\s+(-?[\d.eE+-]+)/g;
+  let m;
+  while ((m = re.exec(text))) nums.push(+m[1], +m[2], +m[3]);
+  const tri = Math.floor(nums.length / 9);
+  const pos = new Float32Array(nums.slice(0, tri * 9));
+  return { pos, nor: new Float32Array(tri * 9), tri };
+}
+
+// STL 的面法線常常是壞的（全零或方向錯誤），一律用叉積重算，並做平面著色
+function rebuildNormals(pos, nor, tri){
+  for (let i = 0; i < tri; i++) {
+    const k = i * 9;
+    const ax = pos[k+3]-pos[k], ay = pos[k+4]-pos[k+1], az = pos[k+5]-pos[k+2];
+    const bx = pos[k+6]-pos[k], by = pos[k+7]-pos[k+1], bz = pos[k+8]-pos[k+2];
+    let nx = ay*bz - az*by, ny = az*bx - ax*bz, nz = ax*by - ay*bx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    for (let v = 0; v < 3; v++) { nor[k+v*3] = nx; nor[k+v*3+1] = ny; nor[k+v*3+2] = nz; }
+  }
+}
+
+// 用有號四面體體積求封閉網格體積（mm³）
+function meshVolume(pos, tri){
+  let v = 0;
+  for (let i = 0; i < tri; i++) {
+    const k = i * 9;
+    const x1=pos[k],y1=pos[k+1],z1=pos[k+2], x2=pos[k+3],y2=pos[k+4],z2=pos[k+5], x3=pos[k+6],y3=pos[k+7],z3=pos[k+8];
+    v += (x1*(y2*z3 - y3*z2) - x2*(y1*z3 - y3*z1) + x3*(y1*z2 - y2*z1)) / 6;
+  }
+  return Math.abs(v);
+}
+
+/* ---------------------------- 場景狀態 ---------------------------- */
+const PALETTE = ['#5aa9ff','#ffb454','#7ee787','#ff8fa3','#c39bff','#4dd0c4','#ffd866','#f78fb3','#88c0ff','#b5e48c'];
+const BEDS = [
+  { name: 'Bambu P1/X1 (256×256×256)', w: 256, d: 256, h: 256 },
+  { name: 'Bambu A1 mini (180×180×180)', w: 180, d: 180, h: 180 },
+  { name: 'Ender 3 (220×220×250)', w: 220, d: 220, h: 250 },
+  { name: 'Prusa MK4 (250×210×220)', w: 250, d: 210, h: 220 },
+  { name: 'Creality K1 (220×220×250)', w: 220, d: 220, h: 250 },
+  { name: '大型 (300×300×400)', w: 300, d: 300, h: 400 },
+  { name: '自訂…', w: 0, d: 0, h: 0 },
+];
+let bed = { w: 256, d: 256, h: 256 };
+const objects = [];
+let selId = null, nextId = 1, colorIdx = 0;
+
+function hex2rgb(h){
+  return [parseInt(h.slice(1,3),16)/255, parseInt(h.slice(3,5),16)/255, parseInt(h.slice(5,7),16)/255];
+}
+
+function makeObject(name, geo){
+  rebuildNormals(geo.pos, geo.nor, geo.tri);
+  // 把幾何重心化到包圍盒中心，之後的旋轉才會繞著自己轉
+  let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < geo.pos.length; i += 3)
+    for (let a = 0; a < 3; a++) {
+      const v = geo.pos[i+a];
+      if (v < mn[a]) mn[a] = v;
+      if (v > mx[a]) mx[a] = v;
+    }
+  if (!isFinite(mn[0])) { mn = [0,0,0]; mx = [0,0,0]; }
+  const c = [(mn[0]+mx[0])/2, (mn[1]+mx[1])/2, (mn[2]+mx[2])/2];
+  for (let i = 0; i < geo.pos.length; i += 3) {
+    geo.pos[i] -= c[0]; geo.pos[i+1] -= c[1]; geo.pos[i+2] -= c[2];
+  }
+
+  const o = {
+    id: nextId++, name, color: PALETTE[colorIdx++ % PALETTE.length],
+    visible: true, print: true,
+    pos: geo.pos, nor: geo.nor, tri: geo.tri,
+    lmin: V.sub(mn, c), lmax: V.sub(mx, c),
+    vol: meshVolume(geo.pos, geo.tri),
+    p: [bed.w/2, bed.d/2, 0], basis: M3.ident(), s: 1,
+    vbo: gl.createBuffer(), nbo: gl.createBuffer(),
+  };
+  gl.bindBuffer(gl.ARRAY_BUFFER, o.vbo); gl.bufferData(gl.ARRAY_BUFFER, geo.pos, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, o.nbo); gl.bufferData(gl.ARRAY_BUFFER, geo.nor, gl.STATIC_DRAW);
+  updateXform(o);
+  return o;
+}
+
+function modelMatrix(o){
+  const b = o.basis, s = o.s;
+  return new Float32Array([
+    b[0]*s, b[1]*s, b[2]*s, 0,
+    b[3]*s, b[4]*s, b[5]*s, 0,
+    b[6]*s, b[7]*s, b[8]*s, 0,
+    o.p[0], o.p[1], o.p[2], 1,
+  ]);
+}
+
+// 重算 model 矩陣與世界包圍盒（旋轉後的 OBB 取軸對齊外框）
+function updateXform(o){
+  o.model = modelMatrix(o);
+  const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < 8; i++) {
+    const c = [
+      i & 1 ? o.lmax[0] : o.lmin[0],
+      i & 2 ? o.lmax[1] : o.lmin[1],
+      i & 4 ? o.lmax[2] : o.lmin[2],
+    ];
+    const w = M4.xformPoint(o.model, c);
+    for (let a = 0; a < 3; a++) { if (w[a] < mn[a]) mn[a] = w[a]; if (w[a] > mx[a]) mx[a] = w[a]; }
+  }
+  o.wmin = mn; o.wmax = mx;
+  o.size = [mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]];
+  o.oob = mn[0] < -0.01 || mn[1] < -0.01 || mn[2] < -0.01
+       || mx[0] > bed.w + 0.01 || mx[1] > bed.d + 0.01 || mx[2] > bed.h + 0.01;
+}
+
+const byId = id => objects.find(o => o.id === id);
+const selected = () => byId(selId);
+
+function dropToBed(o){ o.p[2] -= o.wmin[2]; updateXform(o); }
+
+const autoDrop = () => document.getElementById('autodrop').checked;
+
+function applyRot(o, mat){
+  // 繞著自己的中心轉：先記住中心，轉完再放回去，零件不會亂飛
+  const c = [(o.wmin[0]+o.wmax[0])/2, (o.wmin[1]+o.wmax[1])/2, (o.wmin[2]+o.wmax[2])/2];
+  o.basis = M3.mul(mat, o.basis);
+  updateXform(o);
+  o.p[0] += c[0] - (o.wmin[0]+o.wmax[0])/2;
+  o.p[1] += c[1] - (o.wmin[1]+o.wmax[1])/2;
+  o.p[2] += c[2] - (o.wmin[2]+o.wmax[2])/2;
+  updateXform(o);
+  if (autoDrop()) dropToBed(o);
+}
+
+/* ---------------------------- 相機 ---------------------------- */
+const cam = { target: [bed.w/2, bed.d/2, bed.h*0.18], dist: bed.w*2, yaw: -0.9, pitch: 0.5 };
+
+function camEye(){
+  const cp = Math.cos(cam.pitch);
+  return [
+    cam.target[0] + cam.dist * cp * Math.cos(cam.yaw),
+    cam.target[1] + cam.dist * cp * Math.sin(cam.yaw),
+    cam.target[2] + cam.dist * Math.sin(cam.pitch),
+  ];
+}
+function viewProj(){
+  const eye = camEye();
+  const aspect = canvas.width / Math.max(1, canvas.height);
+  const near = Math.max(1, cam.dist * 0.01), far = cam.dist * 12 + 2000;
+  const proj = M4.perspective(50 * Math.PI/180, aspect, near, far);
+  const view = M4.lookAt(eye, cam.target, [0, 0, 1]);
+  return { eye, vp: M4.mul(proj, view) };
+}
+function setView(kind){
+  if (kind === 'top')        { cam.yaw = -Math.PI/2; cam.pitch = 1.5533; }
+  else if (kind === 'front') { cam.yaw = -Math.PI/2; cam.pitch = 0.02; }
+  else if (kind === 'right') { cam.yaw = 0; cam.pitch = 0.02; }
+  else                       { cam.yaw = -0.9; cam.pitch = 0.5; }
+  fitAll();
+}
+function fitAll(){
+  const vis = objects.filter(o => o.visible);
+  let mn, mx;
+  if (vis.length) {
+    mn = [Infinity, Infinity, Infinity]; mx = [-Infinity, -Infinity, -Infinity];
+    for (const o of vis) for (let a = 0; a < 3; a++) {
+      if (o.wmin[a] < mn[a]) mn[a] = o.wmin[a];
+      if (o.wmax[a] > mx[a]) mx[a] = o.wmax[a];
+    }
+  } else {
+    mn = [0, 0, 0]; mx = [bed.w, bed.d, 0];
+  }
+  cam.target = [(mn[0]+mx[0])/2, (mn[1]+mx[1])/2, (mn[2]+mx[2])/2];
+  cam.dist = Math.max(60, V.len(V.sub(mx, mn)) * 1.5);
+  draw();
+}
+
+/* ---------------------------- 底板網格 ---------------------------- */
+let bedLines = null, bedOutline = null;
+function buildBed(){
+  const minor = [], major = [];
+  const step = 10, big = 50;
+  for (let x = 0; x <= bed.w + 0.001; x += step) {
+    const t = (Math.round(x) % big === 0) ? major : minor;
+    t.push(x, 0, 0, x, bed.d, 0);
+  }
+  for (let y = 0; y <= bed.d + 0.001; y += step) {
+    const t = (Math.round(y) % big === 0) ? major : minor;
+    t.push(0, y, 0, bed.w, y, 0);
+  }
+  bedLines = { minor: new Float32Array(minor), major: new Float32Array(major) };
+  const h = bed.h;
+  bedOutline = new Float32Array([
+    // 底框
+    0,0,0, bed.w,0,0,  bed.w,0,0, bed.w,bed.d,0,  bed.w,bed.d,0, 0,bed.d,0,  0,bed.d,0, 0,0,0,
+    // 四根立柱（列印高度上限）
+    0,0,0, 0,0,h,  bed.w,0,0, bed.w,0,h,  bed.w,bed.d,0, bed.w,bed.d,h,  0,bed.d,0, 0,bed.d,h,
+    // 頂框
+    0,0,h, bed.w,0,h,  bed.w,0,h, bed.w,bed.d,h,  bed.w,bed.d,h, 0,bed.d,h,  0,bed.d,h, 0,0,h,
+  ]);
+}
+
+function bboxLines(mn, mx){
+  const c = [];
+  const P = i => [i & 1 ? mx[0] : mn[0], i & 2 ? mx[1] : mn[1], i & 4 ? mx[2] : mn[2]];
+  const edges = [[0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7]];
+  for (const [a, b] of edges) c.push(...P(a), ...P(b));
+  return new Float32Array(c);
+}
+
+/* ---------------------------- 繪製 ---------------------------- */
+let needsDraw = false;
+function draw(){
+  if (needsDraw) return;
+  needsDraw = true;
+  requestAnimationFrame(render);
+}
+
+function render(){
+  needsDraw = false;
+  resize();
+  const { eye, vp } = viewProj();
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0.051, 0.059, 0.078, 1);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  gl.disable(gl.CULL_FACE);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  drawLines(bedLines.minor, [0.32, 0.36, 0.45, 0.28], vp);
+  drawLines(bedLines.major, [0.42, 0.48, 0.60, 0.5], vp);
+  drawLines(bedOutline, [0.45, 0.62, 0.85, 0.6], vp);
+  // 原點軸標示（X 紅 / Y 綠）
+  const ax = Math.min(bed.w, bed.d) * 0.12;
+  drawLines(new Float32Array([0,0,0.05, ax,0,0.05]), [1, 0.4, 0.4, 0.9], vp);
+  drawLines(new Float32Array([0,0,0.05, 0,ax,0.05]), [0.4, 1, 0.5, 0.9], vp);
+
+  gl.useProgram(meshProg);
+  gl.uniform3fv(U.eye, eye);
+  gl.enableVertexAttribArray(U.aPos);
+  gl.enableVertexAttribArray(U.aNor);
+
+  const ghostOn = document.getElementById('ghost').checked;
+  const solid = [], ghost = [];
+  for (const o of objects) {
+    if (!o.visible) continue;
+    ((!o.print && ghostOn) ? ghost : solid).push(o);
+  }
+
+  gl.disable(gl.BLEND);
+  gl.depthMask(true);
+  for (const o of solid) drawMesh(o, vp, 1);
+
+  if (ghost.length) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+    for (const o of ghost) drawMesh(o, vp, 0.22);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+  }
+
+  const sel = selected();
+  if (sel && sel.visible) {
+    drawLines(bboxLines(sel.wmin, sel.wmax), sel.oob ? [1, 0.42, 0.42, 0.95] : [0.35, 0.66, 1, 0.9], vp);
+  }
+}
+
+function drawMesh(o, vp, alpha){
+  const isSel = o.id === selId;
+  let col = hex2rgb(o.color);
+  if (o.oob) col = [Math.min(1, col[0]*0.35 + 0.65), col[1]*0.28, col[2]*0.28];
+  gl.uniformMatrix4fv(U.mvp, false, M4.mul(vp, o.model));
+  gl.uniformMatrix4fv(U.model, false, o.model);
+  gl.uniformMatrix3fv(U.nmat, false, M4.normalMat(o.model));
+  gl.uniform3fv(U.color, col);
+  gl.uniform1f(U.alpha, alpha);
+  gl.uniform1f(U.sel, isSel ? 1 : 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, o.vbo);
+  gl.vertexAttribPointer(U.aPos, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, o.nbo);
+  gl.vertexAttribPointer(U.aNor, 3, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, o.tri * 3);
+}
+
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+}
+window.addEventListener('resize', draw);
+
+/* ---------------------------- 滑鼠拾取 ---------------------------- */
+function screenRay(ev){
+  const r = canvas.getBoundingClientRect();
+  const x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+  const y = 1 - ((ev.clientY - r.top) / r.height) * 2;
+  const { eye, vp } = viewProj();
+  const inv = M4.invert(vp);
+  const p = (nx, ny, nz) => {
+    const w = inv[3]*nx + inv[7]*ny + inv[11]*nz + inv[15];
+    return [
+      (inv[0]*nx + inv[4]*ny + inv[8]*nz + inv[12]) / w,
+      (inv[1]*nx + inv[5]*ny + inv[9]*nz + inv[13]) / w,
+      (inv[2]*nx + inv[6]*ny + inv[10]*nz + inv[14]) / w,
+    ];
+  };
+  const a = p(x, y, -1), b = p(x, y, 1);
+  return { o: eye, d: V.norm(V.sub(b, a)) };
+}
+
+// 射線與 AABB 相交（slab 法），用來快速剔除
+function hitAABB(ro, rd, mn, mx){
+  let t0 = -Infinity, t1 = Infinity;
+  for (let a = 0; a < 3; a++) {
+    if (Math.abs(rd[a]) < 1e-9) { if (ro[a] < mn[a] || ro[a] > mx[a]) return false; continue; }
+    const inv = 1 / rd[a];
+    let ta = (mn[a] - ro[a]) * inv, tb = (mx[a] - ro[a]) * inv;
+    if (ta > tb) { const t = ta; ta = tb; tb = t; }
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1) return false;
+  }
+  return t1 > 0;
+}
+
+// Möller–Trumbore，在物件的區域座標下做，仿射變換不改變射線參數 t
+function rayMesh(o, ro, rd){
+  const inv = M4.invert(o.model);
+  const lo = M4.xformPoint(inv, ro), ld = M4.xformDir(inv, rd);
+  if (!hitAABB(lo, ld, o.lmin, o.lmax)) return Infinity;
+  const p = o.pos;
+  let best = Infinity;
+  for (let i = 0, n = o.tri * 9; i < n; i += 9) {
+    const e1x = p[i+3]-p[i], e1y = p[i+4]-p[i+1], e1z = p[i+5]-p[i+2];
+    const e2x = p[i+6]-p[i], e2y = p[i+7]-p[i+1], e2z = p[i+8]-p[i+2];
+    const hx = ld[1]*e2z - ld[2]*e2y, hy = ld[2]*e2x - ld[0]*e2z, hz = ld[0]*e2y - ld[1]*e2x;
+    const det = e1x*hx + e1y*hy + e1z*hz;
+    if (det > -1e-10 && det < 1e-10) continue;
+    const f = 1 / det;
+    const sx = lo[0]-p[i], sy = lo[1]-p[i+1], sz = lo[2]-p[i+2];
+    const u = f * (sx*hx + sy*hy + sz*hz);
+    if (u < 0 || u > 1) continue;
+    const qx = sy*e1z - sz*e1y, qy = sz*e1x - sx*e1z, qz = sx*e1y - sy*e1x;
+    const v = f * (ld[0]*qx + ld[1]*qy + ld[2]*qz);
+    if (v < 0 || u + v > 1) continue;
+    const t = f * (e2x*qx + e2y*qy + e2z*qz);
+    if (t > 1e-4 && t < best) best = t;
+  }
+  return best;
+}
+
+function pick(ev){
+  const { o: ro, d: rd } = screenRay(ev);
+  let hit = null, bestT = Infinity;
+  for (const o of objects) {
+    if (!o.visible) continue;
+    if (!hitAABB(ro, rd, o.wmin, o.wmax)) continue;
+    const t = rayMesh(o, ro, rd);
+    if (t < bestT) { bestT = t; hit = o; }
+  }
+  return hit ? { obj: hit, point: V.add(ro, V.scale(rd, bestT)), ray: { ro, rd } } : { obj: null, ray: { ro, rd } };
+}
+
+function planeHit(ro, rd, pn, pd){
+  const denom = V.dot(pn, rd);
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = (pd - V.dot(pn, ro)) / denom;
+  return t > 0 ? V.add(ro, V.scale(rd, t)) : null;
+}
+
+/* ---------------------------- 互動 ---------------------------- */
+let drag = null;
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('pointerdown', ev => {
+  canvas.setPointerCapture(ev.pointerId);
+  const pan = ev.button === 1 || ev.button === 2 || ev.altKey;
+
+  if (pan) { drag = { mode: 'pan', x: ev.clientX, y: ev.clientY }; return; }
+
+  if (ev.button === 0) {
+    const hit = pick(ev);
+    if (hit.obj) {
+      select(hit.obj.id);
+      const o = hit.obj;
+      if (ev.shiftKey) {
+        // 垂直移動：用一個面向鏡頭、通過抓取點的鉛直平面
+        const eye = camEye();
+        const n = V.norm([eye[0]-hit.point[0], eye[1]-hit.point[1], 0]);
+        drag = { mode: 'moveZ', o, plane: n, pd: V.dot(n, hit.point), start: o.p.slice(), anchor: hit.point };
+      } else {
+        drag = { mode: 'moveXY', o, plane: [0,0,1], pd: hit.point[2], start: o.p.slice(), anchor: hit.point };
+      }
+      return;
+    }
+    select(null);
+    drag = { mode: 'orbit', x: ev.clientX, y: ev.clientY };
+  }
+});
+
+canvas.addEventListener('pointermove', ev => {
+  if (!drag) return;
+  if (drag.mode === 'orbit') {
+    cam.yaw   -= (ev.clientX - drag.x) * 0.008;
+    cam.pitch += (ev.clientY - drag.y) * 0.008;
+    cam.pitch = Math.max(-1.5533, Math.min(1.5533, cam.pitch));
+    drag.x = ev.clientX; drag.y = ev.clientY;
+    draw();
+  } else if (drag.mode === 'pan') {
+    const eye = camEye();
+    const fwd = V.norm(V.sub(cam.target, eye));
+    const right = V.norm(V.cross(fwd, [0,0,1]));
+    const up = V.cross(right, fwd);
+    const k = cam.dist * 0.0016;
+    cam.target = V.add(cam.target, V.add(V.scale(right, -(ev.clientX - drag.x) * k),
+                                         V.scale(up, (ev.clientY - drag.y) * k)));
+    drag.x = ev.clientX; drag.y = ev.clientY;
+    draw();
+  } else {
+    const { o: ro, d: rd } = screenRay(ev);
+    const hit = planeHit(ro, rd, drag.plane, drag.pd);
+    if (!hit) return;
+    const d = V.sub(hit, drag.anchor);
+    const o = drag.o;
+    if (drag.mode === 'moveXY') {
+      o.p[0] = Math.round((drag.start[0] + d[0]) * 10) / 10;
+      o.p[1] = Math.round((drag.start[1] + d[1]) * 10) / 10;
+    } else {
+      o.p[2] = Math.round((drag.start[2] + d[2]) * 10) / 10;
+    }
+    updateXform(o);
+    syncInspector();
+    refreshList();
+    draw();
+  }
+});
+
+function endDrag(ev){
+  if (drag && ev) { try { canvas.releasePointerCapture(ev.pointerId); } catch {} }
+  drag = null;
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+canvas.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  cam.dist *= Math.exp(Math.sign(ev.deltaY) * 0.12);
+  cam.dist = Math.max(10, Math.min(20000, cam.dist));
+  draw();
+}, { passive: false });
+
+window.addEventListener('keydown', ev => {
+  const tag = (ev.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+  const o = selected();
+  const k = ev.key.toLowerCase();
+  if (k === 'escape') { select(null); return; }
+  if (!o) return;
+  const sign = ev.shiftKey ? -1 : 1;
+  if (k === 'x' || k === 'y' || k === 'z') {
+    if (ev.ctrlKey || ev.metaKey) return;
+    applyRot(o, M3.rot(k, sign * Math.PI/2));
+  } else if (k === 'm') {
+    applyRot(o, M3.mirror('x'));
+  } else if (k === 'd') {
+    duplicate(o);
+  } else if (k === 'f') {
+    cam.target = [(o.wmin[0]+o.wmax[0])/2, (o.wmin[1]+o.wmax[1])/2, (o.wmin[2]+o.wmax[2])/2];
+    cam.dist = Math.max(40, V.len(o.size) * 2);
+  } else if (k === 'delete' || k === 'backspace') {
+    removeObj(o.id);
+  } else return;
+  ev.preventDefault();
+  syncInspector(); refreshList(); draw();
+});
+
+/* ---------------------------- 匯入 ---------------------------- */
+const dropEl = document.getElementById('drop');
+const fileEl = document.getElementById('file');
+dropEl.addEventListener('click', () => fileEl.click());
+fileEl.addEventListener('change', () => { addFiles(fileEl.files); fileEl.value = ''; });
+
+for (const el of [dropEl, document.getElementById('view')]) {
+  el.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('over'); });
+  el.addEventListener('dragleave', () => dropEl.classList.remove('over'));
+  el.addEventListener('drop', e => {
+    e.preventDefault(); dropEl.classList.remove('over');
+    addFiles(e.dataTransfer.files);
+  });
+}
+
+async function addFiles(files){
+  const list = [...files].filter(f => /\.stl$/i.test(f.name));
+  if (!list.length) { toast('沒有可用的 STL 檔'); return; }
+  const added = [];
+  for (const f of list) {
+    try {
+      const geo = parseSTL(await f.arrayBuffer());
+      if (!geo.tri) { toast(`${f.name}：讀不到三角形，跳過`); continue; }
+      const o = makeObject(f.name.replace(/\.stl$/i, ''), geo);
+      objects.push(o);
+      added.push(o);
+    } catch (err) {
+      console.error(err);
+      toast(`${f.name} 解析失敗`);
+    }
+  }
+  if (!added.length) return;
+  placeNew(added);
+  select(added[added.length - 1].id);
+  if (objects.length === added.length) fitAll();
+  refreshList(); draw();
+  toast(`已匯入 ${added.length} 個模型`);
+}
+
+/* ---------------------------- 排版 ---------------------------- */
+const GAP = 4;
+
+// 只替新加入的物件找空位，不動已經擺好的
+function placeNew(newOnes){
+  const placed = objects.filter(o => !newOnes.includes(o)).map(footprint);
+  for (const o of newOnes) {
+    dropToBed(o);
+    const fp = footprint(o);
+    const w = fp.w, d = fp.d;
+    let spot = null;
+    for (let y = GAP; y + d <= bed.d - GAP && !spot; y += 2) {
+      for (let x = GAP; x + w <= bed.w - GAP; x += 2) {
+        const box = { x, y, w, d };
+        if (!placed.some(p => overlaps(p, box))) { spot = box; break; }
+      }
+    }
+    if (!spot) spot = { x: GAP, y: GAP, w, d };   // 放不下就疊在角落，會標紅
+    moveFootprintTo(o, spot.x, spot.y);
+    placed.push(footprint(o));
+  }
+}
+
+function footprint(o){
+  return { x: o.wmin[0] - GAP/2, y: o.wmin[1] - GAP/2, w: o.size[0] + GAP, d: o.size[1] + GAP };
+}
+function overlaps(a, b){
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.d && b.y < a.y + a.d;
+}
+function moveFootprintTo(o, x, y){
+  o.p[0] += x + GAP/2 - o.wmin[0];
+  o.p[1] += y + GAP/2 - o.wmin[1];
+  updateXform(o);
+}
+
+// 全部重排：面積大的先放，貨架式擺法
+function arrangeAll(){
+  const items = objects.filter(o => o.visible).slice()
+    .sort((a, b) => (b.size[0]*b.size[1]) - (a.size[0]*a.size[1]));
+  let x = GAP, y = GAP, rowH = 0;
+  for (const o of items) {
+    dropToBed(o);
+    const w = o.size[0] + GAP, d = o.size[1] + GAP;
+    if (x + w > bed.w - GAP && x > GAP) { x = GAP; y += rowH; rowH = 0; }
+    moveFootprintTo(o, x, y);
+    x += w; rowH = Math.max(rowH, d);
+  }
+  refreshList(); draw();
+  const bad = objects.filter(o => o.oob).length;
+  toast(bad ? `已排列，有 ${bad} 個放不下` : '已排列');
+}
+
+/* ---------------------------- 清單 UI ---------------------------- */
+const listEl = document.getElementById('list');
+const emptyEl = document.getElementById('empty');
+
+function refreshList(){
+  emptyEl.style.display = objects.length ? 'none' : '';
+  listEl.innerHTML = '';
+  for (const o of objects) {
+    const row = document.createElement('div');
+    row.className = 'item' + (o.id === selId ? ' sel' : '') + (o.oob ? ' oob' : '') + (o.visible ? '' : ' hidden');
+    row.title = o.name;
+
+    const chk = document.createElement('input');
+    chk.type = 'checkbox'; chk.checked = o.print;
+    chk.title = '列印這個';
+    chk.onclick = e => { e.stopPropagation(); o.print = chk.checked; refreshStats(); draw(); };
+
+    const sw = document.createElement('span');
+    sw.className = 'swatch'; sw.style.background = o.color;
+
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.innerHTML = `${esc(o.name)}<small>${fmt(o.size[0])} × ${fmt(o.size[1])} × ${fmt(o.size[2])} mm${o.oob ? ' ⚠' : ''}</small>`;
+
+    const eye = document.createElement('button');
+    eye.className = 'icobtn'; eye.textContent = o.visible ? '👁' : '🚫';
+    eye.title = '顯示 / 隱藏';
+    eye.onclick = e => { e.stopPropagation(); o.visible = !o.visible; refreshList(); draw(); };
+
+    const del = document.createElement('button');
+    del.className = 'icobtn'; del.textContent = '✕'; del.title = '刪除';
+    del.onclick = e => { e.stopPropagation(); removeObj(o.id); };
+
+    row.append(chk, sw, nm, eye, del);
+    row.onclick = () => { select(o.id); };
+    listEl.appendChild(row);
+  }
+  refreshStats();
+  updateBanner();
+}
+
+const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const fmt = n => (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1));
+
+function updateBanner(){
+  const bad = objects.filter(o => o.visible && o.oob);
+  const b = document.getElementById('banner');
+  if (bad.length) {
+    b.style.display = 'block';
+    b.textContent = `⚠ ${bad.length} 個模型超出列印範圍：${bad.slice(0, 3).map(o => o.name).join('、')}${bad.length > 3 ? '…' : ''}`;
+  } else b.style.display = 'none';
+}
+
+function refreshStats(){
+  const on = objects.filter(o => o.print);
+  const vol = on.reduce((s, o) => s + o.vol * o.s ** 3, 0) / 1000;   // mm³ → cm³
+  const tri = on.reduce((s, o) => s + o.tri, 0);
+  const bad = on.filter(o => o.oob).length;
+  document.getElementById('stats').innerHTML = `
+    <div><span>已勾選</span><b>${on.length} / ${objects.length}</b></div>
+    <div><span>三角形總數</span><b>${tri.toLocaleString()}</b></div>
+    <div><span>實體體積</span><b>${vol.toFixed(1)} cm³</b></div>
+    <div><span>實心料重 (PLA)</span><b>${(vol * 1.24).toFixed(0)} g</b></div>
+    ${bad ? `<div><span style="color:var(--warn)">超出範圍</span><b style="color:var(--warn)">${bad}</b></div>` : ''}`;
+}
+
+/* ---------------------------- 檢視器 UI ---------------------------- */
+const insp = document.getElementById('insp');
+const noSel = document.getElementById('noSel');
+
+function select(id){
+  selId = id;
+  refreshList(); syncInspector(); draw();
+}
+
+function syncInspector(){
+  const o = selected();
+  insp.hidden = !o;
+  noSel.hidden = !!o;
+  if (!o) return;
+  document.getElementById('selName').textContent = o.name;
+  document.getElementById('selSize').textContent =
+    `${fmt(o.size[0])} × ${fmt(o.size[1])} × ${fmt(o.size[2])} mm`;
+  document.getElementById('selVol').textContent = `${(o.vol * o.s ** 3 / 1000).toFixed(2)} cm³`;
+  document.getElementById('selTri').textContent = o.tri.toLocaleString();
+  document.getElementById('selOob').style.display = o.oob ? 'block' : 'none';
+  for (const [id, v] of [['posX', o.p[0]], ['posY', o.p[1]], ['posZ', o.p[2]]]) {
+    const el = document.getElementById(id);
+    if (document.activeElement !== el) el.value = Math.round(v * 10) / 10;
+  }
+  const sc = document.getElementById('scale');
+  if (document.activeElement !== sc) sc.value = Math.round(o.s * 1000) / 10;
+}
+
+for (const [id, axis] of [['posX', 0], ['posY', 1], ['posZ', 2]]) {
+  document.getElementById(id).addEventListener('input', () => {
+    const o = selected(); if (!o) return;
+    const v = parseFloat(document.getElementById(id).value);
+    if (!isFinite(v)) return;
+    o.p[axis] = v; updateXform(o); refreshList(); draw();
+  });
+}
+
+document.getElementById('scale').addEventListener('input', e => {
+  const o = selected(); if (!o) return;
+  const v = parseFloat(e.target.value);
+  if (!isFinite(v) || v <= 0) return;
+  o.s = v / 100; updateXform(o); if (autoDrop()) dropToBed(o);
+  refreshList(); syncInspector(); draw();
+});
+for (const b of document.querySelectorAll('[data-scale]')) b.onclick = () => {
+  const o = selected(); if (!o) return;
+  o.s = +b.dataset.scale / 100; updateXform(o); if (autoDrop()) dropToBed(o);
+  refreshList(); syncInspector(); draw();
+};
+
+for (const b of document.querySelectorAll('[data-rot]')) b.onclick = () => {
+  const o = selected(); if (!o) return;
+  const [axis, deg] = b.dataset.rot.split(',');
+  applyRot(o, M3.rot(axis, +deg * Math.PI / 180));
+  refreshList(); syncInspector(); draw();
+};
+for (const b of document.querySelectorAll('[data-rotfree]')) b.onclick = () => {
+  const o = selected(); if (!o) return;
+  const deg = parseFloat(document.getElementById('freeAng').value) || 0;
+  applyRot(o, M3.rot(b.dataset.rotfree, deg * Math.PI / 180));
+  refreshList(); syncInspector(); draw();
+};
+for (const b of document.querySelectorAll('[data-mirror]')) b.onclick = () => {
+  const o = selected(); if (!o) return;
+  applyRot(o, M3.mirror(b.dataset.mirror));
+  refreshList(); syncInspector(); draw();
+};
+document.getElementById('btnResetRot').onclick = () => {
+  const o = selected(); if (!o) return;
+  o.basis = M3.ident(); updateXform(o); if (autoDrop()) dropToBed(o);
+  refreshList(); syncInspector(); draw();
+};
+document.getElementById('btnDrop').onclick = () => {
+  const o = selected(); if (!o) return;
+  dropToBed(o); refreshList(); syncInspector(); draw();
+};
+document.getElementById('btnCenter').onclick = () => {
+  const o = selected(); if (!o) return;
+  o.p[0] += bed.w/2 - (o.wmin[0] + o.wmax[0]) / 2;
+  o.p[1] += bed.d/2 - (o.wmin[1] + o.wmax[1]) / 2;
+  updateXform(o); refreshList(); syncInspector(); draw();
+};
+document.getElementById('btnDup').onclick = () => { const o = selected(); if (o) duplicate(o); };
+document.getElementById('btnDel').onclick = () => { const o = selected(); if (o) removeObj(o.id); };
+
+function duplicate(src){
+  const o = {
+    ...src,
+    id: nextId++,
+    name: src.name + ' 複本',
+    color: PALETTE[colorIdx++ % PALETTE.length],
+    p: src.p.slice(),
+    basis: new Float32Array(src.basis),
+  };
+  objects.push(o);          // 幾何與 GPU buffer 共用，複本不佔額外記憶體
+  updateXform(o);
+  placeNew([o]);
+  select(o.id);
+  refreshList(); draw();
+}
+
+function removeObj(id){
+  const i = objects.findIndex(o => o.id === id);
+  if (i < 0) return;
+  objects.splice(i, 1);
+  if (selId === id) selId = null;
+  refreshList(); syncInspector(); draw();
+}
+
+/* ---------------------------- 工具列 ---------------------------- */
+document.getElementById('btnArrange').onclick = arrangeAll;
+document.getElementById('btnDropAll').onclick = () => {
+  objects.forEach(dropToBed); refreshList(); syncInspector(); draw();
+};
+document.getElementById('btnClear').onclick = () => {
+  if (objects.length && !confirm('清空所有模型？')) return;
+  objects.length = 0; selId = null;
+  refreshList(); syncInspector(); draw();
+};
+document.getElementById('btnFit').onclick = () => fitAll();
+document.getElementById('ghost').onchange = draw;
+for (const b of document.querySelectorAll('[data-view]')) b.onclick = () => setView(b.dataset.view);
+
+/* ---------------------------- 列印床設定 ---------------------------- */
+const presetEl = document.getElementById('bedPreset');
+BEDS.forEach((b, i) => presetEl.add(new Option(b.name, i)));
+
+function applyBed(w, d, h, recenterCam){
+  bed = { w, d, h };
+  document.getElementById('bedW').value = w;
+  document.getElementById('bedD').value = d;
+  document.getElementById('bedH').value = h;
+  buildBed();
+  objects.forEach(updateXform);
+  try { localStorage.setItem('stlPreviewBed', JSON.stringify(bed)); } catch {}
+  if (recenterCam) { cam.target = [w/2, d/2, h*0.18]; cam.dist = w * 2; }
+  refreshList(); syncInspector(); draw();
+}
+presetEl.onchange = () => {
+  const b = BEDS[+presetEl.value];
+  if (b.w) applyBed(b.w, b.d, b.h, true);
+};
+for (const id of ['bedW', 'bedD', 'bedH']) {
+  document.getElementById(id).addEventListener('input', () => {
+    const w = +document.getElementById('bedW').value || 10;
+    const d = +document.getElementById('bedD').value || 10;
+    const h = +document.getElementById('bedH').value || 10;
+    presetEl.value = String(BEDS.findIndex(b => b.w === w && b.d === d && b.h === h) >= 0
+      ? BEDS.findIndex(b => b.w === w && b.d === d && b.h === h)
+      : BEDS.length - 1);
+    applyBed(w, d, h, false);
+  });
+}
+
+/* ---------------------------- 匯出 ---------------------------- */
+document.getElementById('btnCopy').onclick = () => {
+  const on = objects.filter(o => o.print);
+  if (!on.length) { toast('沒有勾選任何模型'); return; }
+  const lines = on.map(o =>
+    `${o.name}\t${fmt(o.size[0])}×${fmt(o.size[1])}×${fmt(o.size[2])} mm\t` +
+    `${(o.vol * o.s ** 3 / 1000).toFixed(2)} cm³` +
+    (o.s !== 1 ? `\t縮放 ${(o.s * 100).toFixed(0)}%` : '') +
+    (o.oob ? '\t⚠ 超出範圍' : ''));
+  const vol = on.reduce((s, o) => s + o.vol * o.s ** 3, 0) / 1000;
+  lines.push(`—— 共 ${on.length} 件，${vol.toFixed(1)} cm³，實心約 ${(vol * 1.24).toFixed(0)} g (PLA)`);
+  const text = lines.join('\n');
+  const done = () => toast('清單已複製');
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+};
+function fallbackCopy(text, done){
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch { toast('複製失敗'); }
+  ta.remove();
+}
+
+// 把整盤（勾選且顯示中的）依照目前擺位輸出成一個二進位 STL，可直接丟切片軟體
+document.getElementById('btnExport').onclick = () => {
+  const on = objects.filter(o => o.print && o.visible);
+  if (!on.length) { toast('沒有勾選任何模型'); return; }
+  const total = on.reduce((s, o) => s + o.tri, 0);
+  const buf = new ArrayBuffer(84 + total * 50);
+  const dv = new DataView(buf);
+  new Uint8Array(buf, 0, 80).set(new TextEncoder().encode('STL plate exported by STL preview arranger'));
+  dv.setUint32(80, total, true);
+
+  let off = 84;
+  for (const o of on) {
+    const m = o.model, flip = M3.det(o.basis) < 0;   // 鏡射後要換頂點順序，法線才朝外
+    for (let i = 0; i < o.tri; i++) {
+      const k = i * 9;
+      let a = M4.xformPoint(m, [o.pos[k], o.pos[k+1], o.pos[k+2]]);
+      let b = M4.xformPoint(m, [o.pos[k+3], o.pos[k+4], o.pos[k+5]]);
+      const c = M4.xformPoint(m, [o.pos[k+6], o.pos[k+7], o.pos[k+8]]);
+      if (flip) { const t = a; a = b; b = t; }
+      const n = V.norm(V.cross(V.sub(b, a), V.sub(c, a)));
+      for (const v of [n, a, b, c]) {
+        dv.setFloat32(off, v[0], true);
+        dv.setFloat32(off+4, v[1], true);
+        dv.setFloat32(off+8, v[2], true);
+        off += 12;
+      }
+      dv.setUint16(off, 0, true); off += 2;
+    }
+  }
+  const url = URL.createObjectURL(new Blob([buf], { type: 'model/stl' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = 'plate.stl';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast(`已匯出 ${on.length} 件（${total.toLocaleString()} 個三角形）`);
+};
+
+/* ---------------------------- 提示 ---------------------------- */
+let toastTimer = null;
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.opacity = '0'; }, 2200);
+}
+
+/* ---------------------------- 啟動 ---------------------------- */
+(function init(){
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('stlPreviewBed') || 'null'); } catch {}
+  const b = saved && saved.w ? saved : BEDS[0];
+  const idx = BEDS.findIndex(x => x.w === b.w && x.d === b.d && x.h === b.h);
+  presetEl.value = String(idx >= 0 ? idx : BEDS.length - 1);
+  applyBed(b.w, b.d, b.h, true);
+  refreshList(); syncInspector(); draw();
+})();
+</script>
+</body>
+</html>
