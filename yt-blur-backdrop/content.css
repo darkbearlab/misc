@@ -1,0 +1,73 @@
+/* 背景層：固定在視窗最底下，不吃滑鼠事件 */
+#ytbb-root {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  display: none;
+  contain: strict;
+}
+html.ytbb-active #ytbb-root { display: block; }
+
+#ytbb-canvas {
+  position: absolute;
+  /* 往外多撐一圈，避免模糊在邊緣變淡 */
+  inset: calc(var(--ytbb-blur, 60px) * -2);
+  width: calc(100% + var(--ytbb-blur, 60px) * 4);
+  height: calc(100% + var(--ytbb-blur, 60px) * 4);
+  filter: blur(var(--ytbb-blur, 60px)) saturate(var(--ytbb-saturate, 1.4));
+  transform: translateZ(0);
+}
+
+#ytbb-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgb(255 255 255 / var(--ytbb-dim, 0.35));
+}
+html[dark] #ytbb-overlay { background: rgb(0 0 0 / var(--ytbb-dim, 0.35)); }
+
+/* 把 YouTube 的實心底色挖空，讓模糊背景透出來 */
+html.ytbb-active {
+  --yt-spec-base-background: transparent !important;
+  --yt-spec-general-background-a: transparent !important;
+}
+html.ytbb-active body,
+html.ytbb-active ytd-app,
+html.ytbb-active ytd-app #content,
+html.ytbb-active ytd-page-manager,
+html.ytbb-active ytd-watch-flexy,
+html.ytbb-active ytd-watch-grid,
+html.ytbb-active #columns,
+html.ytbb-active #player-full-bleed-container,
+html.ytbb-active #full-bleed-container,
+html.ytbb-active #player-container-outer,
+html.ytbb-active #player-container-inner {
+  background: transparent !important;
+}
+
+/* YouTube 自己的「劇院燈光」效果和我們重疊，關掉 */
+html.ytbb-active #cinematics,
+html.ytbb-active #cinematics-container {
+  display: none !important;
+}
+
+/* 頂列改成毛玻璃，捲動時內容不會跟標題列混在一起 */
+html.ytbb-active #masthead-container {
+  background: rgb(255 255 255 / 0.55) !important;
+  backdrop-filter: blur(24px) saturate(1.4);
+}
+html.ytbb-active[dark] #masthead-container {
+  background: rgb(15 15 15 / 0.55) !important;
+}
+html.ytbb-active ytd-masthead { background: transparent !important; }
+html.ytbb-active ytd-masthead #background { opacity: 0 !important; }
+
+/* 播放器內的上下／左右黑邊 */
+html.ytbb-active.ytbb-letterbox #movie_player,
+html.ytbb-active.ytbb-letterbox .html5-video-player,
+html.ytbb-active.ytbb-letterbox .html5-video-container,
+html.ytbb-active.ytbb-letterbox #player-container,
+html.ytbb-active.ytbb-letterbox #player {
+  background: transparent !important;
+}

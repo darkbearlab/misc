@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube 模糊背景",
+  "version": "1.0.0",
+  "description": "把正在播放的影片即時高斯模糊，鋪滿 YouTube 觀看頁的黑底／白底背景。",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["defaults.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "YouTube 模糊背景",
+    "default_popup": "popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": { "id": "yt-blur-backdrop@darkbearlab" }
+  }
+}

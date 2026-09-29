@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 13px system-ui, sans-serif; margin: 0; padding: 14px 16px; width: 260px; }
+  h1 { font-size: 14px; margin: 0 0 12px; }
+  label { display: block; margin: 10px 0; }
+  .row { display: flex; justify-content: space-between; align-items: center; }
+  .val { opacity: .7; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; margin-top: 4px; }
+  button { margin-top: 8px; width: 100%; padding: 6px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>YouTube 模糊背景</h1>
+  <label class="row">啟用 <input type="checkbox" id="enabled"></label>
+  <label class="row">播放器黑邊也填滿 <input type="checkbox" id="letterbox"></label>
+  <label><div class="row">模糊程度 <span class="val" id="blur-val"></span></div>
+    <input type="range" id="blur" min="10" max="150" step="5"></label>
+  <label><div class="row">遮罩濃度 <span class="val" id="dim-val"></span></div>
+    <input type="range" id="dim" min="0" max="0.9" step="0.05"></label>
+  <label><div class="row">飽和度 <span class="val" id="saturate-val"></span></div>
+    <input type="range" id="saturate" min="0.5" max="2.5" step="0.1"></label>
+  <label><div class="row">更新頻率 <span class="val" id="fps-val"></span></div>
+    <input type="range" id="fps" min="5" max="60" step="5"></label>
+  <button id="reset">恢復預設</button>
+  <script src="defaults.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
