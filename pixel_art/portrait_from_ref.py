@@ -123,29 +123,52 @@ def smooth(out):
 for _ in range(3):
     out = smooth(out)
 
+def clean_silhouette(out):
+    """Shave one-pixel bumps off the outer contour and fill one-pixel notches in it."""
+    for _ in range(4):
+        changed = False
+        for y in range(H):
+            for x in range(W):
+                inside = (x, y) in out
+                n_in = [(x + dx, y + dy) in out for dx, dy in N4]
+                if inside and n_in.count(False) >= 3 and y < H - 1:
+                    del out[(x, y)]; changed = True
+                elif not inside and n_in.count(True) >= 3:
+                    nb = [out[(x + dx, y + dy)] for dx, dy in N4 if (x + dx, y + dy) in out]
+                    out[(x, y)] = max(set(nb), key=nb.count); changed = True
+        if not changed:
+            break
+    return out
+out = clean_silhouette(out)
+
 # --- hand-drawn face features (positions traced from the sheet, in crop coords) ---
 def T(x, y):
     return round((x - OX) / S), round((y - OY) / S)
 IRIS, WHITE = (104, 96, 112), (248, 248, 240)
-def put(p, c):
+PROTECT = set()
+def put(p, c, keep=True):           # everything drawn by hand is kept as-is
     out[p] = c
+    if keep:
+        PROTECT.add(p)
+def put_k(p, c):
+    put(p, c, keep=True)
 def eye(cx, cy, wdt, tilt):
     """FE-style eye: thick upper lid, dark-topped iris, one highlight."""
     X, Y = T(cx, cy)
     half = wdt // 2
     for i in range(-half - 1, half + 1):            # upper lid, 2px, slanting with the head
         yy = Y - 2 - round(i * tilt)
-        put((X + i, yy), OUT); put((X + i, yy + 1), OUT)
+        put_k((X + i, yy), OUT); put_k((X + i, yy + 1), OUT)
     for i in range(-half, half):
         yy = Y - round(i * tilt)
-        put((X + i, yy), WHITE); put((X + i, yy + 1), WHITE)
+        put_k((X + i, yy), WHITE); put_k((X + i, yy + 1), WHITE)
     for dx in (-1, 0, 1):                            # iris
-        put((X + dx, Y - round(dx * tilt)), OUT)
-        put((X + dx, Y + 1 - round(dx * tilt)), IRIS)
-    put((X, Y + 2), IRIS)
-    put((X - 1, Y), WHITE)                           # highlight
+        put_k((X + dx, Y - round(dx * tilt)), OUT)
+        put_k((X + dx, Y + 1 - round(dx * tilt)), IRIS)
+    put_k((X, Y + 2), IRIS)
+    put_k((X - 1, Y), WHITE)                           # highlight
     for i in range(-half + 1, half - 1):             # lower lid
-        put((X + i, Y + 3 - round(i * tilt)), RAMPS['skin'][0])
+        put_k((X + i, Y + 3 - round(i * tilt)), RAMPS['skin'][0])
 def ring(x0, y0, x1, y1):
     """Round lens: outline of an ellipse (drawn on a scratch mask, then copied)."""
     a, b = T(x0, y0), T(x1, y1)
@@ -169,6 +192,104 @@ nx, ny = T(107, 120); put((nx, ny), RAMPS['skin'][0])
 for (x, y), c in list(out.items()):
     if y < H - 1 and any((x + dx, y + dy) not in out for dx, dy in N4):
         out[(x, y)] = OUT
+
+def fix_tone_bumps(out):
+    """A flat-colour pixel with at most one same-coloured side neighbour is a bump:
+    it takes the colour most of its side neighbours share."""
+    n = 0
+    for (x, y), c in list(out.items()):
+        if (x, y) in PROTECT or c in (OUT, STRAND):
+            continue
+        n4 = [out.get((x + dx, y + dy)) for dx, dy in N4]
+        if n4.count(c) <= 1:
+            others = [v for v in n4 if v is not None and v != c]
+            if others:
+                top = max(set(others), key=others.count)
+                if others.count(top) >= 2:
+                    out[(x, y)] = top; n += 1
+    return n
+
+RING = [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)]
+def thin_lines(out, col):
+    """Zhang-Suen thinning of one line colour: lines end up one pixel wide, so curves have
+    no doubled corners or teeth. Line ends are kept. A removed pixel on the silhouette edge
+    becomes background, otherwise it takes the surrounding flat colour."""
+    total = 0
+    while True:
+        removed = 0
+        for step in (0, 1):
+            kill = []
+            for (x, y), c in out.items():
+                if c != col or (x, y) in PROTECT:
+                    continue
+                P = [out.get((x + dx, y + dy)) == col for dx, dy in RING]
+                B = sum(P)
+                A = sum(1 for i in range(8) if not P[i] and P[(i + 1) % 8])
+                if not (2 <= B <= 6 and A == 1):
+                    continue
+                p2, p4, p6, p8 = P[0], P[2], P[4], P[6]
+                if step == 0 and not (p2 and p4 and p6) and not (p4 and p6 and p8):
+                    kill.append((x, y))
+                if step == 1 and not (p2 and p4 and p8) and not (p2 and p6 and p8):
+                    kill.append((x, y))
+            for x, y in kill:
+                if any((x + dx, y + dy) not in out for dx, dy in N4):
+                    del out[(x, y)]
+                    removed += 1
+                else:
+                    nb = [out.get((x + dx, y + dy)) for dx, dy in N8]
+                    tones = [v for v in nb if v is not None and v not in (OUT, STRAND)]
+                    if tones:
+                        out[(x, y)] = max(set(tones), key=tones.count)
+                        removed += 1
+        total += removed
+        if not removed:
+            return total
+
+for _ in range(3):
+    n = fix_tone_bumps(out) + thin_lines(out, OUT) + thin_lines(out, STRAND)
+    if not n:
+        break
+# a removed edge pixel can leave flat colour touching the background: close the contour again
+for (x, y), c in list(out.items()):
+    if (x, y) not in PROTECT and y < H - 1 and any((x + dx, y + dy) not in out for dx, dy in N4):
+        out[(x, y)] = OUT
+thin_lines(out, OUT)
+
+def prune(out):
+    """Spurs and dashes: outline pixels with a single outline neighbour that touch the
+    background are teeth on the contour (dropped); hair strands shorter than 3 pixels are
+    dashes, not strands (they take the hair colour around them)."""
+    for _ in range(2):
+        for (x, y), c in list(out.items()):
+            if c == OUT and (x, y) not in PROTECT and y < H - 1:
+                k = sum(out.get((x + dx, y + dy)) == OUT for dx, dy in N8)
+                if k <= 1 and any((x + dx, y + dy) not in out for dx, dy in N4):
+                    del out[(x, y)]
+    seen = set()
+    for p, c in list(out.items()):
+        if c != STRAND or p in seen:
+            continue
+        comp, stack = [], [p]
+        seen.add(p)
+        while stack:
+            x, y = stack.pop(); comp.append((x, y))
+            for dx, dy in N8:
+                q = (x + dx, y + dy)
+                if q not in seen and out.get(q) == STRAND:
+                    seen.add(q); stack.append(q)
+        if len(comp) < 3:
+            for x, y in comp:
+                nb = [out.get((x + dx, y + dy)) for dx, dy in N8]
+                tones = [v for v in nb if v is not None and v not in (OUT, STRAND)]
+                if tones:
+                    out[(x, y)] = max(set(tones), key=tones.count)
+prune(out)
+for (x, y), c in list(out.items()):          # re-close the contour after pruning
+    if (x, y) not in PROTECT and y < H - 1 and any((x + dx, y + dy) not in out for dx, dy in N4):
+        out[(x, y)] = OUT
+thin_lines(out, OUT)
+fix_tone_bumps(out)
 
 img = Image.new('RGBA', (W, H), (0, 0, 0, 0))
 for (x, y), c in out.items():
