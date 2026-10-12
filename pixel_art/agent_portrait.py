@@ -1,109 +1,147 @@
-"""GBA Fire Emblem-style portrait (96x80, 15 colours + transparent, RGB555 values)."""
+"""GBA Fire Emblem-style portrait (96x80, 15 colours + transparent, RGB555 values).
+
+Style notes taken from GBA FE mugs: big head facing left, light from the upper left,
+one shared dark-purple outline colour, cream skin with orange shading, hair drawn as
+tapered locks, a heavy upper eyelid line."""
 import os
 from PIL import Image, ImageDraw
 
 PAL = [
     (0, 0, 0),         # 0 transparent
-    (40, 24, 32),      # 1 outline
-    (248, 224, 200),   # 2 skin light
-    (232, 184, 152),   # 3 skin mid
-    (192, 136, 120),   # 4 skin shadow
-    (224, 208, 184),   # 5 hair light
-    (184, 160, 136),   # 6 hair mid
-    (128, 104, 96),    # 7 hair shadow
-    (104, 112, 136),   # 8 iris
-    (248, 248, 240),   # 9 white
-    (200, 200, 200),   # 10 coat mid
-    (144, 144, 152),   # 11 coat shadow
-    (48, 48, 56),      # 12 suit
-    (96, 96, 112),     # 13 suit highlight
-    (216, 128, 120),   # 14 mouth
-    (88, 72, 80),      # 15 glasses frame
+    (80, 56, 88),      # 1 outline
+    (248, 248, 208),   # 2 skin light
+    (248, 216, 136),   # 3 skin mid
+    (240, 168, 88),    # 4 skin shadow
+    (200, 112, 56),    # 5 skin dark
+    (232, 216, 184),   # 6 hair light
+    (192, 168, 144),   # 7 hair mid
+    (136, 112, 104),   # 8 hair dark
+    (112, 120, 152),   # 9 iris
+    (248, 248, 248),   # 10 white
+    (200, 200, 216),   # 11 coat mid / glasses frame
+    (136, 136, 160),   # 12 coat shadow
+    (48, 48, 64),      # 13 suit
+    (96, 96, 128),     # 14 suit highlight
+    (168, 176, 200),   # 15 iris light
 ]
 W, H = 96, 80
+SKIN, HAIR, SUIT, COAT = 1, 2, 3, 4   # region ids
 
-img = Image.new('P', (W, H), 0)
-d = ImageDraw.Draw(img)
-P = lambda pts, c: d.polygon(pts, fill=c)
-L = lambda pts, c, w=1: d.line(pts, fill=c, width=w)
-px = lambda x, y, c: img.putpixel((x, y), c)
+col = Image.new('P', (W, H), 0)
+reg = Image.new('L', (W, H), 0)
+dc, dr = ImageDraw.Draw(col), ImageDraw.Draw(reg)
 
-# --- body ---
-P([(22, 80), (26, 68), (34, 61), (44, 58), (58, 58), (66, 61), (74, 68), (78, 80)], 3)   # bare shoulders
-P([(30, 66), (36, 62), (44, 60), (40, 66)], 2)                                           # shoulder light
-P([(39, 60), (61, 60), (66, 80), (34, 80)], 12)                                           # bodysuit
-L([(39, 71), (41, 67), (45, 65)], 13); L([(42, 68), (44, 67)], 13)                       # bust highlights
-L([(55, 65), (59, 67), (61, 71)], 13); L([(56, 67), (58, 68)], 13)
-L([(50, 66), (50, 80)], 1)                                                                # center seam
-L([(41, 60), (36, 70)], 1); L([(59, 60), (64, 70)], 1)                                    # harness straps
-L([(34, 74), (66, 74)], 1); d.rectangle([48, 73, 52, 75], fill=10)                         # chest strap + buckle
-# coat, slipping off the shoulders
-P([(4, 80), (10, 70), (20, 66), (30, 70), (34, 80)], 9)
-P([(4, 80), (10, 72), (16, 70), (18, 80)], 10)
-P([(24, 72), (30, 72), (34, 80), (28, 80)], 11)
-P([(66, 80), (70, 70), (80, 66), (90, 72), (94, 80)], 9)
-P([(80, 70), (90, 74), (94, 80), (84, 80)], 10)
-P([(66, 80), (70, 72), (74, 74), (72, 80)], 11)
-L([(12, 74), (14, 80)], 11); L([(20, 68), (24, 80)], 10)
-L([(86, 74), (84, 80)], 11); L([(78, 68), (76, 80)], 10)
+def poly(pts, c, r=None):
+    dc.polygon(pts, fill=c)
+    if r is not None:
+        dr.polygon(pts, fill=r)
+
+def line(pts, c, w=1):
+    dc.line(pts, fill=c, width=w)
+
+def px(x, y, c):
+    col.putpixel((x, y), c)
+
+# ---------- body ----------
+poly([(14, 80), (20, 70), (30, 64), (42, 61), (60, 59), (72, 62), (82, 70), (88, 80)], 2, SKIN)   # shoulders
+poly([(56, 60), (72, 62), (82, 70), (88, 80), (70, 80), (66, 68)], 3)                            # far-side shading
+poly([(36, 64), (64, 61), (70, 80), (32, 80)], 13, SUIT)                                         # bodysuit
+line([(38, 72), (42, 67), (48, 66)], 14); line([(55, 65), (61, 66), (65, 71)], 14)            # bust highlights
+line([(51, 67), (51, 80)], 1)
+line([(38, 64), (33, 72)], 1); line([(63, 61), (68, 72)], 1)                                     # harness straps
+line([(34, 76), (68, 76)], 1); dc.rectangle([49, 75, 53, 77], fill=11)
+# coat slipping off the shoulders
+poly([(0, 80), (4, 72), (14, 68), (24, 70), (32, 80)], 10, COAT)
+poly([(0, 80), (4, 74), (10, 72), (12, 80)], 11); line([(20, 71), (24, 80)], 11); line([(14, 72), (16, 80)], 12)
+poly([(72, 80), (76, 70), (86, 66), (95, 70), (95, 80)], 10, COAT)
+poly([(84, 70), (95, 72), (95, 80), (88, 80)], 11); line([(80, 70), (78, 80)], 12); line([(90, 74), (88, 80)], 12)
 # turtleneck
-P([(42, 50), (58, 48), (60, 60), (40, 61)], 12)
-L([(42, 54), (59, 52)], 13)
+poly([(41, 52), (58, 49), (62, 62), (38, 64)], 13, SUIT)
+poly([(54, 50), (58, 49), (62, 62), (57, 62)], 14)
+line([(41, 57), (60, 54)], 1)
 
-# --- head ---
-P([(30, 20), (33, 10), (41, 5), (53, 5), (62, 9), (67, 18), (68, 32), (66, 44), (62, 50), (56, 50), (52, 40), (36, 40)], 6)  # hair back
-P([(36, 22), (35, 31), (37, 38), (41, 44), (45, 47), (50, 46), (55, 41), (58, 34), (58, 22)], 3)   # face
-P([(36, 22), (35, 31), (37, 37), (44, 40), (52, 36), (56, 24)], 2)                                 # face light
-P([(52, 38), (58, 30), (58, 36), (55, 42), (50, 46)], 4)                                           # jaw shadow
-P([(45, 46), (55, 41), (56, 50), (46, 52)], 4)                                                     # neck
-L([(41, 44), (45, 47), (50, 46), (55, 41)], 1)                                                     # jaw line
-P([(36, 22), (58, 22), (56, 30), (52, 24), (48, 30), (45, 23), (40, 29), (38, 24), (35, 30)], 4)  # bang shadow on forehead
-# bangs / front hair
-P([(31, 22), (34, 12), (42, 7), (54, 7), (62, 12), (64, 22), (58, 22), (55, 27), (52, 21), (48, 27), (45, 20), (40, 26), (38, 21), (34, 28)], 5)
-P([(54, 7), (62, 12), (64, 22), (58, 22)], 6)
-P([(31, 22), (34, 28), (33, 40), (36, 44), (31, 42), (29, 32)], 6)       # front lock (far side)
-P([(58, 22), (62, 20), (65, 30), (64, 44), (61, 48), (59, 40)], 6)       # side lock (near side)
-P([(62, 26), (66, 30), (65, 44), (62, 48)], 7)
-L([(36, 14), (40, 11), (46, 10), (52, 11)], 9)                            # hair ring highlight
-L([(37, 15), (41, 12)], 5)
-L([(58, 12), (63, 22)], 7); L([(66, 22), (67, 34)], 7); L([(60, 30), (62, 42)], 7)  # back strands
-L([(32, 30), (33, 39)], 7)
-L([(45, 20), (48, 27)], 7); L([(52, 21), (55, 27)], 7)                   # bang separations
+# ---------- head ----------
+HAIR_BACK = [(22, 28), (24, 15), (31, 7), (43, 2), (56, 3), (66, 8), (72, 17), (75, 30), (74, 42),
+             (72, 52), (68, 60), (64, 55), (60, 58), (58, 46), (36, 46)]
+poly(HAIR_BACK, 7, HAIR)
+FACE = [(32, 18), (29, 30), (30, 38), (33, 45), (37, 50), (41, 54), (46, 52), (53, 47), (59, 40), (62, 31), (62, 18)]
+poly(FACE, 2, SKIN)
+poly([(46, 52), (53, 47), (59, 40), (62, 31), (62, 18), (57, 22), (57, 36), (51, 45)], 3)       # far cheek shade
+poly([(44, 52), (56, 46), (58, 58), (46, 60)], 3, SKIN)                                         # neck
+poly([(45, 53), (56, 47), (57, 51), (47, 56)], 4)                                               # under-chin shadow
+line([(45, 53), (50, 51), (56, 47)], 5)
 
-# --- face details ---
-# eyes (3/4 left): far eye narrower
-for x0, w in ((38, 5), (47, 7)):
-    d.rectangle([x0, 30, x0 + w - 1, 33], fill=9)
-    d.rectangle([x0 + 1, 30, x0 + w - 3, 33], fill=8)
-    px(x0 + 1, 30, 1); L([(x0, 29), (x0 + w - 1, 29)], 1)                 # upper lash
-    px(x0 + 2, 31, 9)                                                     # highlight
-L([(38, 27), (42, 26)], 7); L([(47, 26), (53, 26)], 7)                   # brows
-# glasses
-d.rectangle([36, 28, 43, 35], outline=15)
-d.rectangle([45, 28, 55, 35], outline=15)
-L([(43, 31), (45, 31)], 15); L([(55, 30), (60, 29)], 15)
-px(37, 34, 9); px(46, 34, 9)                                             # lens glint
-px(43, 37, 4); px(42, 38, 4)                                             # nose
-L([(43, 42), (46, 42)], 14)                                              # mouth
+# bangs: tapered locks hanging over the forehead
+BANGS = [(26, 24), (28, 14), (35, 7), (45, 4), (56, 5), (64, 10), (68, 18), (66, 28),
+         (63, 25), (62, 37),            # long lock on the near side
+         (59, 26), (56, 31),
+         (54, 24), (51, 37),            # long lock between the eyes
+         (49, 25), (46, 30),
+         (44, 24), (40, 34),            # lock over the far eye
+         (38, 25), (35, 29),
+         (33, 27), (31, 38), (29, 47), (27, 40), (26, 32)]
+# hair casts a soft shadow onto the face: draw the bangs shifted down-right in skin-mid first
+dc.polygon([(x + 1, y + 2) for x, y in BANGS], fill=3)
+poly(BANGS, 6, HAIR)
+poly([(55, 5), (64, 10), (68, 18), (66, 28), (63, 25), (62, 37), (59, 26), (58, 18), (56, 10)], 7)  # far side of bangs in shade
+poly([(26, 24), (28, 18), (31, 22), (33, 27), (31, 38), (29, 47), (27, 40), (26, 32)], 7)
+# side lock on the near (right) side in front of the neck
+poly([(62, 22), (68, 18), (72, 30), (70, 44), (66, 54), (63, 46), (61, 34)], 7, HAIR)
+# hair shading: locks
+for pts, c in [
+    ([(44, 6), (38, 14), (34, 22), (31, 32)], 7), ([(48, 6), (45, 14), (43, 22)], 7),
+    ([(52, 6), (53, 14), (53, 26)], 7), ([(56, 7), (60, 15), (61, 24)], 7),
+    ([(60, 8), (66, 16), (67, 26)], 8), ([(64, 24), (68, 34), (66, 48)], 8),
+    ([(70, 22), (72, 34), (70, 48)], 8), ([(33, 26), (29, 36), (28, 44)], 7),
+    ([(24, 22), (24, 30)], 8), ([(62, 30), (64, 44), (64, 52)], 8),
+]:
+    line(pts, c)
+line([(36, 26), (38, 22)], 7); line([(47, 27), (48, 22)], 7); line([(52, 30), (53, 22)], 8)
+line([(30, 14), (36, 9), (44, 7), (52, 7)], 10)                                                  # shine ring
+line([(31, 16), (37, 11), (43, 9)], 6); px(33, 13, 10); px(38, 10, 6)
 
-pal = sum(PAL, ())
-img.putpalette(pal + (0, 0, 0) * (256 - len(PAL)))
+# ---------- face ----------
+# eyes: far eye (left) narrow, near eye (right) wider; heavy upper lid
+for x0, w in ((33, 5), (44, 7)):
+    dc.rectangle([x0, 35, x0 + w - 1, 38], fill=10)
+    dc.rectangle([x0 + 1, 35, x0 + w - 2, 38], fill=9)
+    dc.rectangle([x0 + 1, 37, x0 + w - 2, 38], fill=15)
+    px(x0 + 2, 36, 10)
+    line([(x0 - 1, 34), (x0 + w - 1, 34)], 1); line([(x0, 33), (x0 + w - 2, 33)], 1)
+    px(x0 + w - 1, 35, 1)
+    line([(x0 + 1, 39), (x0 + w - 2, 39)], 3)
+line([(33, 31), (37, 30)], 8); line([(45, 30), (50, 30)], 8)                                     # brows (through bangs gaps)
+# glasses: thin light frames
+for x0, y0, x1, y1 in ((31, 32, 39, 40), (42, 32, 52, 40)):   # rounded frames
+    line([(x0 + 1, y0), (x1 - 1, y0)], 11); line([(x0 + 1, y1), (x1 - 1, y1)], 11)
+    line([(x0, y0 + 1), (x0, y1 - 1)], 11); line([(x1, y0 + 1), (x1, y1 - 1)], 11)
+line([(40, 35), (41, 35)], 11); line([(53, 34), (60, 32)], 11)
+px(32, 39, 10); px(43, 39, 10)
+# nose / mouth / cheek
+px(39, 43, 4); px(38, 44, 5)
+line([(38, 48), (41, 48)], 5); px(42, 47, 4)
+line([(52, 43), (55, 40)], 4)
 
-# outline pass: every filled pixel next to transparency becomes outline
-src = img.copy()
+# ---------- outline pass ----------
+src_c, src_r = col.copy(), reg.copy()
+def R(x, y):
+    return src_r.getpixel((x, y)) if 0 <= x < W and 0 <= y < H else 0
 for y in range(H):
     for x in range(W):
-        if src.getpixel((x, y)) == 0:
+        r = R(x, y)
+        if not r:
             continue
-        if any(not (0 <= x + dx < W and 0 <= y + dy < H) or src.getpixel((x + dx, y + dy)) == 0
-               for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
-            if y < H - 1:
-                img.putpixel((x, y), 1)
+        n = [R(x + dx, y + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+        edge = any(v == 0 for v in n) and y < H - 1
+        hair_over = r == HAIR and any(v == SKIN for v in n)
+        if edge or hair_over:
+            col.putpixel((x, y), 1)
 
-img.info['transparency'] = 0
-d_ = os.path.dirname(os.path.abspath(__file__))
-img.save(os.path.join(d_, 'agent_portrait_96x80.png'), transparency=0)
-big = img.convert('RGBA').resize((W * 6, H * 6), Image.NEAREST)
-bg = Image.new('RGBA', big.size, (96, 120, 168, 255))
+col.putpalette(sum(PAL, ()) + (0, 0, 0) * (256 - len(PAL)))
+col.info['transparency'] = 0
+out = os.path.dirname(os.path.abspath(__file__))
+col.save(os.path.join(out, 'agent_portrait_96x80.png'), transparency=0)
+big = col.convert('RGBA').resize((W * 6, H * 6), Image.NEAREST)
+bg = Image.new('RGBA', big.size, (160, 200, 152, 255))
 bg.alpha_composite(big)
-bg.save(os.path.join(d_, 'agent_portrait_preview.png'))
+bg.save(os.path.join(out, 'agent_portrait_preview.png'))
